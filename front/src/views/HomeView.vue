@@ -166,10 +166,18 @@ async function createPlan() {
           <a class="transition hover:text-[#c6a15b] focus:outline-none focus:ring-2 focus:ring-[#c6a15b] focus:ring-offset-2 focus:ring-offset-[#0b1012]" href="#features">方法</a>
         </nav>
 
-        <a href="#planner" class="inline-flex min-h-11 items-center gap-2 rounded-full bg-[#f3ebdd] px-5 py-2 text-sm font-bold text-[#0b1012] shadow-lg shadow-black/15 transition hover:-translate-y-0.5 hover:bg-[#d8bf86] focus:outline-none focus:ring-2 focus:ring-[#c6a15b] focus:ring-offset-2 focus:ring-offset-[#0b1012]">
-          开始写路线
-          <ArrowRight class="h-4 w-4" aria-hidden="true" />
-        </a>
+        <div class="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
+          <RouterLink to="/login" class="inline-flex min-h-11 items-center rounded-full border border-[#f3ebdd]/16 bg-[#f3ebdd]/8 px-4 py-2 text-sm font-bold text-[#f3ebdd] backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-[#c6a15b]/50 hover:bg-[#f3ebdd]/12 focus:outline-none focus:ring-2 focus:ring-[#c6a15b] focus:ring-offset-2 focus:ring-offset-[#0b1012]">
+            登录
+          </RouterLink>
+          <RouterLink to="/login" class="inline-flex min-h-11 items-center rounded-full border border-[#c6a15b]/35 bg-[#c6a15b]/12 px-4 py-2 text-sm font-bold text-[#dcc793] backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-[#c6a15b]/60 hover:bg-[#c6a15b]/18 focus:outline-none focus:ring-2 focus:ring-[#c6a15b] focus:ring-offset-2 focus:ring-offset-[#0b1012]">
+            注册
+          </RouterLink>
+          <a href="#planner" class="inline-flex min-h-11 items-center gap-2 rounded-full bg-[#f3ebdd] px-5 py-2 text-sm font-bold text-[#0b1012] shadow-lg shadow-black/15 transition hover:-translate-y-0.5 hover:bg-[#d8bf86] focus:outline-none focus:ring-2 focus:ring-[#c6a15b] focus:ring-offset-2 focus:ring-offset-[#0b1012]">
+            开始写路线
+            <ArrowRight class="h-4 w-4" aria-hidden="true" />
+          </a>
+        </div>
       </header>
 
       <section id="top" class="mx-auto grid max-w-7xl items-center gap-12 px-4 pb-20 pt-12 sm:px-6 sm:pt-16 lg:grid-cols-[0.92fr_1.08fr] lg:px-8 lg:pb-28">
