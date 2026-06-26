@@ -1,0 +1,16 @@
+# Claude local workspace data
+.claude/
+
+# Frontend generated files
+front/node_modules/
+front/dist/
+
+# Backend generated files
+backend/.venv/
+__pycache__/
+*.py[cod]
+
+# Local environment
+.env
+*.env
+!.env.example
