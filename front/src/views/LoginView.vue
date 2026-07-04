@@ -33,6 +33,8 @@ const emailInput = ref<HTMLInputElement | null>(null)
 const passwordInput = ref<HTMLInputElement | null>(null)
 const characterEls = ref<Array<HTMLElement | null>>([])
 let resultTimer: number | undefined
+let pointerFrame: number | undefined
+let nextPointer = { x: 0, y: 0 }
 
 const canSubmit = computed(() => form.email.trim().length > 0 && form.password.length > 0)
 const isResultMood = computed(() => mood.value === 'fail' || mood.value === 'success')
@@ -54,8 +56,15 @@ function setMood(nextMood: Mood) {
 }
 
 function updatePointer(event: PointerEvent) {
-  pointer.x = event.clientX
-  pointer.y = event.clientY
+  nextPointer = { x: event.clientX, y: event.clientY }
+
+  if (!pointerFrame) {
+    pointerFrame = window.requestAnimationFrame(() => {
+      pointer.x = nextPointer.x
+      pointer.y = nextPointer.y
+      pointerFrame = undefined
+    })
+  }
 
   if (isResultMood.value) return
 
@@ -170,6 +179,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   clearResultTimer()
+  if (pointerFrame) window.cancelAnimationFrame(pointerFrame)
   characterEls.value = []
 })
 </script>
@@ -180,8 +190,6 @@ onUnmounted(() => {
       <div class="panel-copy" aria-hidden="true">
         <p>Four tiny guardians are watching the form with you.</p>
       </div>
-
-      <div class="stage-line" aria-hidden="true"></div>
 
       <div class="characters" aria-hidden="true">
         <div
@@ -329,17 +337,6 @@ onUnmounted(() => {
   line-height: 1.5;
 }
 
-.stage-line {
-  position: absolute;
-  left: clamp(24px, 9vw, 120px);
-  right: 12%;
-  bottom: clamp(38px, 6vh, 74px);
-  height: 7px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 18px 42px rgba(20, 20, 20, 0.1);
-}
-
 .characters {
   position: absolute;
   left: clamp(32px, 11vw, 150px);
@@ -354,19 +351,10 @@ onUnmounted(() => {
   transform: translateY(calc(var(--lean) + var(--lift))) rotate(var(--turn));
   transform-origin: 50% 92%;
   transition:
-    transform 360ms cubic-bezier(0.16, 1, 0.3, 1),
-    border-radius 320ms cubic-bezier(0.22, 1, 0.36, 1);
+    transform 420ms cubic-bezier(0.2, 0.85, 0.25, 1),
+    border-radius 360ms cubic-bezier(0.22, 1, 0.36, 1);
+  backface-visibility: hidden;
   will-change: transform;
-}
-
-.character::after {
-  content: "";
-  position: absolute;
-  left: 16%;
-  right: 16%;
-  bottom: -2px;
-  height: 12px;
-  background: inherit;
 }
 
 .orange {
@@ -417,8 +405,9 @@ onUnmounted(() => {
   transition:
     height 260ms cubic-bezier(0.22, 1, 0.36, 1),
     width 260ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 280ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 320ms cubic-bezier(0.2, 0.85, 0.25, 1),
     background 220ms ease;
+  will-change: transform, width, height;
 }
 
 .eye span {
@@ -431,10 +420,11 @@ onUnmounted(() => {
   background: #141414;
   transform: translate(var(--eye-x), var(--eye-y));
   transition:
-    transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 220ms cubic-bezier(0.2, 0.85, 0.25, 1),
     opacity 180ms ease,
     width 220ms cubic-bezier(0.22, 1, 0.36, 1),
     height 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
 }
 
 .orange .left-eye {
@@ -532,7 +522,7 @@ onUnmounted(() => {
 .mood-email .character,
 .mood-password .character,
 .mood-peek .character {
-  transition-duration: 300ms;
+  transition-duration: 360ms;
 }
 
 .mood-email .eye {
@@ -991,10 +981,6 @@ onUnmounted(() => {
     font-size: 13px;
   }
 
-  .stage-line {
-    bottom: clamp(24px, 4vh, 46px);
-  }
-
   .characters {
     left: clamp(16px, 6vw, 56px);
     right: 0;
@@ -1099,12 +1085,6 @@ onUnmounted(() => {
 
   .panel-copy {
     display: none;
-  }
-
-  .stage-line {
-    left: 14px;
-    right: 0;
-    bottom: 20px;
   }
 
   .characters {
@@ -1215,10 +1195,6 @@ onUnmounted(() => {
 }
 
 @media (min-width: 621px) and (max-width: 980px) and (max-height: 760px) {
-  .stage-line {
-    right: 6%;
-  }
-
   .characters {
     left: clamp(10px, 4vw, 34px);
     right: auto;
@@ -1417,11 +1393,6 @@ onUnmounted(() => {
     grid-template-columns: minmax(78px, 0.24fr) minmax(0, 1fr);
   }
 
-  .stage-line {
-    left: 10px;
-    bottom: 14px;
-  }
-
   .characters {
     left: 6px;
     bottom: 14px;
@@ -1469,11 +1440,6 @@ onUnmounted(() => {
 @media (max-width: 380px) {
   .login-page {
     grid-template-columns: 86px minmax(0, 1fr);
-  }
-
-  .stage-line {
-    left: 8px;
-    bottom: 16px;
   }
 
   .characters {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { ArrowRight, Compass, Gem, MapPinned, Route, ShieldCheck } from 'lucide-vue-next'
+import { ArrowRight, CalendarDays, CheckCircle2, Compass, MapPinned, Route, Sparkles } from 'lucide-vue-next'
 
 import { planTrip } from '@/services'
 import type { BudgetLevel, TravelStyle, TripPlanResponse } from '@/types'
@@ -21,82 +21,18 @@ const styleOptions: Array<{ label: string; value: TravelStyle }> = [
   { label: '轻松休闲', value: 'relaxed' },
 ]
 
-const routeFacts = [
-  { label: '出发', value: '从一个目的地开始' },
-  { label: '节奏', value: '按日拆分行程' },
-  { label: '交付', value: '中文路线草案' },
-]
-
 const destinations = [
-  {
-    name: '京都',
-    accent: '枫、茶庭、町屋',
-    description: '适合把早晨留给庭院，把傍晚交给小巷与料理。',
-    tags: ['人文', '秋季', '慢节奏'],
-  },
-  {
-    name: '大理',
-    accent: '风、洱海、院落',
-    description: '在山海之间安排留白，让路线上有停顿，也有抵达。',
-    tags: ['自然', '民宿', '松弛感'],
-  },
-  {
-    name: '巴黎',
-    accent: '左岸、画廊、晨咖啡',
-    description: '用少量明确的坐标，串起一条不赶路的城市路线。',
-    tags: ['艺术', '餐桌', '步行'],
-  },
-  {
-    name: '冰岛',
-    accent: '黑沙滩、温泉、极光',
-    description: '把辽阔风景拆成可执行的动线，保留天气变化的余地。',
-    tags: ['公路', '自然', '季节性'],
-  },
+  { name: '京都', accent: '人文 / 秋季', description: '庭院、町屋和本地料理排成一条慢路线。', tint: 'bg-[#ffe8d4]' },
+  { name: '大理', accent: '自然 / 民宿', description: '把洱海、古城和留白时间放在同一张行程里。', tint: 'bg-[#d9f3e1]' },
+  { name: '巴黎', accent: '艺术 / 步行', description: '用清楚坐标串起左岸、画廊和晨咖啡。', tint: 'bg-[#fde0ec]' },
+  { name: '冰岛', accent: '公路 / 季节', description: '给天气、温泉和远距离交通留出弹性。', tint: 'bg-[#dcecfa]' },
 ]
 
 const features = [
-  {
-    icon: Compass,
-    title: '偏好成形',
-    description: '把预算、月份、旅行风格和补充偏好收束成一条清晰路线。',
-  },
-  {
-    icon: Route,
-    title: '日程有呼吸',
-    description: '每天按上午、下午、晚上展开，避免把旅程压成景点清单。',
-  },
-  {
-    icon: MapPinned,
-    title: '可继续讨论',
-    description: '生成结果是一份中文草案，适合和同行者继续删改、补充、确认。',
-  },
-  {
-    icon: ShieldCheck,
-    title: '提醒不缺席',
-    description: '保留交通、开放时间、天气等核对意识，让计划更接近真实出行。',
-  },
-]
-
-const useCases = [
-  {
-    title: '还没定路线',
-    description: '先得到一版骨架，再决定哪些城市、街区和体验值得留下。',
-  },
-  {
-    title: '同行者很多',
-    description: '用同一份草案讨论节奏、预算和偏好，减少反复沟通。',
-  },
-  {
-    title: '出发前复盘',
-    description: '按天检查路线密度和注意事项，把临行前的信息整理干净。',
-  },
-]
-
-const manuscriptStops = [
-  '一座城市的气质',
-  '一天里的节奏',
-  '值得绕路的餐桌',
-  '出发前需要核对的事',
+  { icon: Compass, title: '偏好成形', description: '预算、月份、旅行风格和补充偏好先收束成一条路线。' },
+  { icon: CalendarDays, title: '按天展开', description: '每天拆成上午、下午、晚上，避免只得到景点清单。' },
+  { icon: Route, title: '动线清楚', description: '围绕相邻区域安排重点，减少无意义往返。' },
+  { icon: CheckCircle2, title: '提醒完整', description: '保留交通、预约、天气和开放时间的核对意识。' },
 ]
 
 const form = reactive({
@@ -145,380 +81,297 @@ async function createPlan() {
 </script>
 
 <template>
-  <main class="min-h-screen overflow-hidden bg-[#0b1012] text-[#f3ebdd] [font-family:Inter,'PingFang_SC','Microsoft_YaHei',sans-serif]">
-    <div class="relative isolate">
-      <div class="absolute inset-0 -z-20 bg-[radial-gradient(circle_at_16%_8%,rgba(123,156,141,0.24),transparent_28%),radial-gradient(circle_at_80%_2%,rgba(198,161,91,0.18),transparent_24%),linear-gradient(140deg,#0b1012_0%,#111917_48%,#07090a_100%)]" />
-      <div class="absolute left-0 top-0 -z-10 h-full w-full bg-[linear-gradient(rgba(243,235,221,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(243,235,221,0.035)_1px,transparent_1px)] bg-[size:72px_72px] [mask-image:linear-gradient(to_bottom,black,transparent_88%)]" />
-      <div class="absolute right-[-10rem] top-[30rem] -z-10 h-[30rem] w-[30rem] rounded-full bg-[#6e2c2c]/25 blur-3xl" />
-      <div class="absolute left-[-12rem] top-[86rem] -z-10 h-[34rem] w-[34rem] rounded-full bg-[#7b9c8d]/20 blur-3xl" />
-
-      <header class="mx-auto flex max-w-7xl items-center justify-between px-4 py-6 sm:px-6 lg:px-8" aria-label="主导航">
-        <a href="#top" class="group inline-flex items-center gap-3 rounded-full border border-[#f3ebdd]/12 bg-[#f3ebdd]/8 px-4 py-2 text-sm font-semibold text-[#f3ebdd] shadow-2xl shadow-black/10 backdrop-blur-xl transition hover:border-[#c6a15b]/50 focus:outline-none focus:ring-2 focus:ring-[#c6a15b] focus:ring-offset-2 focus:ring-offset-[#0b1012]">
-          <span class="flex h-8 w-8 items-center justify-center rounded-full bg-[#c6a15b] text-[#0b1012]">
-            <Gem class="h-4 w-4" aria-hidden="true" />
+  <main class="min-h-screen bg-white text-[#1a1a1a] [font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe_UI','PingFang_SC','Microsoft_YaHei',sans-serif]">
+    <header class="sticky top-0 z-30 border-b border-[#e5e3df] bg-white/90 backdrop-blur">
+      <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
+        <a href="#top" class="flex items-center gap-2 text-sm font-semibold text-[#000000]">
+          <span class="grid h-8 w-8 place-items-center rounded-md bg-[#0a1530] text-white">
+            <MapPinned class="h-4 w-4" aria-hidden="true" />
           </span>
-          <span>远行手稿</span>
+          远行手稿
         </a>
 
-        <nav class="hidden items-center gap-7 text-sm text-[#cfc3ad] md:flex" aria-label="页面章节">
-          <a class="transition hover:text-[#c6a15b] focus:outline-none focus:ring-2 focus:ring-[#c6a15b] focus:ring-offset-2 focus:ring-offset-[#0b1012]" href="#inspiration">目的地</a>
-          <a class="transition hover:text-[#c6a15b] focus:outline-none focus:ring-2 focus:ring-[#c6a15b] focus:ring-offset-2 focus:ring-offset-[#0b1012]" href="#planner">写路线</a>
-          <a class="transition hover:text-[#c6a15b] focus:outline-none focus:ring-2 focus:ring-[#c6a15b] focus:ring-offset-2 focus:ring-offset-[#0b1012]" href="#features">方法</a>
+        <nav class="hidden items-center gap-6 text-sm font-medium text-[#5d5b54] md:flex" aria-label="页面章节">
+          <a class="hover:text-[#000000]" href="#destinations">目的地</a>
+          <a class="hover:text-[#000000]" href="#planner">规划器</a>
+          <a class="hover:text-[#000000]" href="#features">方法</a>
         </nav>
 
-        <div class="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-          <RouterLink to="/login" class="inline-flex min-h-11 items-center rounded-full border border-[#f3ebdd]/16 bg-[#f3ebdd]/8 px-4 py-2 text-sm font-bold text-[#f3ebdd] backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-[#c6a15b]/50 hover:bg-[#f3ebdd]/12 focus:outline-none focus:ring-2 focus:ring-[#c6a15b] focus:ring-offset-2 focus:ring-offset-[#0b1012]">
+        <div class="flex items-center gap-2">
+          <RouterLink to="/login" class="rounded-md border border-[#c8c4be] px-3 py-2 text-sm font-medium hover:bg-[#f6f5f4]">
             登录
           </RouterLink>
-          <RouterLink to="/login" class="inline-flex min-h-11 items-center rounded-full border border-[#c6a15b]/35 bg-[#c6a15b]/12 px-4 py-2 text-sm font-bold text-[#dcc793] backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-[#c6a15b]/60 hover:bg-[#c6a15b]/18 focus:outline-none focus:ring-2 focus:ring-[#c6a15b] focus:ring-offset-2 focus:ring-offset-[#0b1012]">
-            注册
-          </RouterLink>
-          <a href="#planner" class="inline-flex min-h-11 items-center gap-2 rounded-full bg-[#f3ebdd] px-5 py-2 text-sm font-bold text-[#0b1012] shadow-lg shadow-black/15 transition hover:-translate-y-0.5 hover:bg-[#d8bf86] focus:outline-none focus:ring-2 focus:ring-[#c6a15b] focus:ring-offset-2 focus:ring-offset-[#0b1012]">
-            开始写路线
-            <ArrowRight class="h-4 w-4" aria-hidden="true" />
+          <a href="#planner" class="rounded-md bg-[#5645d4] px-3 py-2 text-sm font-medium text-white hover:bg-[#4534b3]">
+            开始规划
           </a>
         </div>
-      </header>
+      </div>
+    </header>
 
-      <section id="top" class="mx-auto grid max-w-7xl items-center gap-12 px-4 pb-20 pt-12 sm:px-6 sm:pt-16 lg:grid-cols-[0.92fr_1.08fr] lg:px-8 lg:pb-28">
-        <div>
-          <p class="inline-flex items-center rounded-full border border-[#c6a15b]/30 bg-[#c6a15b]/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.34em] text-[#d8bf86] backdrop-blur-xl">
-            私人行程工作室
+    <section id="top" class="relative overflow-hidden bg-[#0a1530] text-white">
+      <div class="absolute left-[8%] top-16 h-9 w-9 rotate-6 rounded-md bg-[#f5d75e]" aria-hidden="true" />
+      <div class="absolute right-[18%] top-24 h-7 w-7 -rotate-12 rounded-md bg-[#ff64c8]" aria-hidden="true" />
+      <div class="absolute bottom-16 left-[18%] h-6 w-6 rotate-12 rounded-md bg-[#2a9d99]" aria-hidden="true" />
+      <div class="absolute bottom-28 right-[10%] h-8 w-8 -rotate-6 rounded-md bg-[#dd5b00]" aria-hidden="true" />
+
+      <div class="mx-auto grid max-w-7xl gap-10 px-4 py-16 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:px-8 lg:py-24">
+        <div class="self-center">
+          <p class="mb-5 inline-flex rounded-md bg-white/10 px-3 py-1 text-xs font-semibold text-[#d6b6f6]">
+            AI travel workspace
           </p>
-          <h1 class="mt-7 max-w-4xl text-5xl font-semibold leading-[0.96] tracking-[-0.08em] text-[#fff8ea] [font-family:'Noto_Serif_SC','Songti_SC',serif] sm:text-6xl lg:text-7xl">
-            旅行不该像表格，应该像一份慢慢展开的手稿。
+          <h1 class="max-w-3xl text-5xl font-semibold leading-tight sm:text-6xl lg:text-7xl">
+            把旅行想法整理成可执行的日程。
           </h1>
-          <p class="mt-7 max-w-2xl text-base leading-8 text-[#cfc3ad] sm:text-lg">
-            输入目的地、出发地、天数与偏好，先得到一版可讨论的中文路线。它不替你决定旅行，只把散落的想法整理成清楚的日程、节奏与提醒。
+          <p class="mt-6 max-w-2xl text-lg leading-8 text-[#d9d7d2]">
+            输入目的地、天数、预算和偏好，生成一版中文路线草案。先得到骨架，再和同行者一起删改。
           </p>
-
-          <div class="mt-10 flex flex-col gap-3 sm:flex-row">
-            <a href="#planner" class="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-[#c6a15b] px-7 py-3 font-bold text-[#0b1012] shadow-xl shadow-black/20 transition hover:-translate-y-0.5 hover:bg-[#e2c98e] focus:outline-none focus:ring-2 focus:ring-[#c6a15b] focus:ring-offset-2 focus:ring-offset-[#0b1012]">
+          <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+            <a href="#planner" class="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[#5645d4] px-5 py-3 text-sm font-medium text-white hover:bg-[#4534b3]">
               生成路线草案
               <ArrowRight class="h-4 w-4" aria-hidden="true" />
             </a>
-            <a href="#inspiration" class="inline-flex min-h-12 items-center justify-center rounded-full border border-[#f3ebdd]/15 bg-[#f3ebdd]/8 px-7 py-3 font-bold text-[#f3ebdd] backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-[#7b9c8d]/60 hover:bg-[#f3ebdd]/12 focus:outline-none focus:ring-2 focus:ring-[#7b9c8d] focus:ring-offset-2 focus:ring-offset-[#0b1012]">
-              先看目的地气质
+            <a href="#destinations" class="inline-flex min-h-11 items-center justify-center rounded-md border border-white/40 px-5 py-3 text-sm font-medium text-white hover:bg-white/10">
+              查看示例目的地
             </a>
           </div>
-
-          <dl class="mt-10 grid gap-3 sm:grid-cols-3">
-            <div v-for="fact in routeFacts" :key="fact.label" class="border-l border-[#c6a15b]/40 pl-4">
-              <dt class="text-xs font-bold uppercase tracking-[0.28em] text-[#c6a15b]">{{ fact.label }}</dt>
-              <dd class="mt-2 text-sm leading-6 text-[#d8d0bf]">{{ fact.value }}</dd>
-            </div>
-          </dl>
         </div>
 
-        <div class="relative mx-auto w-full max-w-xl lg:max-w-none" aria-label="路线手稿示意">
-          <div class="absolute -inset-6 rounded-[3rem] bg-[#c6a15b]/8 blur-3xl" />
-          <div class="relative overflow-hidden rounded-[2.4rem] border border-[#f3ebdd]/14 bg-[#f3ebdd]/[0.075] p-4 shadow-[0_34px_120px_rgba(0,0,0,0.34)] backdrop-blur-2xl sm:p-6">
-            <div class="absolute right-8 top-8 h-32 w-32 rounded-full border border-[#c6a15b]/20" />
-            <div class="absolute right-14 top-14 h-20 w-20 rounded-full border border-[#c6a15b]/15" />
-            <div class="rounded-[2rem] border border-[#f3ebdd]/12 bg-[#111917]/78 p-6 sm:p-8">
-              <div class="flex items-start justify-between gap-5">
-                <div>
-                  <p class="text-xs font-bold uppercase tracking-[0.3em] text-[#7b9c8d]">Route Manuscript</p>
-                  <h2 class="mt-3 text-3xl font-semibold tracking-[-0.05em] text-[#fff8ea] [font-family:'Noto_Serif_SC','Songti_SC',serif]">京都，十月。</h2>
+        <div class="rounded-xl border border-[#e5e3df] bg-white text-[#1a1a1a] shadow-2xl shadow-black/30">
+          <div class="flex items-center justify-between border-b border-[#e5e3df] px-4 py-3">
+            <div class="flex gap-1.5" aria-hidden="true">
+              <span class="h-3 w-3 rounded-full bg-[#ff64c8]" />
+              <span class="h-3 w-3 rounded-full bg-[#f5d75e]" />
+              <span class="h-3 w-3 rounded-full bg-[#1aae39]" />
+            </div>
+            <p class="text-xs font-semibold text-[#787671]">Route workspace</p>
+          </div>
+
+          <div class="grid gap-4 p-4 sm:grid-cols-[0.8fr_1.2fr]">
+            <aside class="rounded-lg bg-[#f6f5f4] p-4">
+              <p class="text-xs font-semibold text-[#787671]">Trip brief</p>
+              <h2 class="mt-2 text-2xl font-semibold">京都，10月</h2>
+              <div class="mt-5 space-y-2 text-sm">
+                <p class="rounded-md bg-[#e6e0f5] px-3 py-2 text-[#391c57]">人文历史</p>
+                <p class="rounded-md bg-[#ffe8d4] px-3 py-2 text-[#793400]">本地美食</p>
+                <p class="rounded-md bg-[#d9f3e1] px-3 py-2 text-[#1a1a1a]">慢节奏早晨</p>
+              </div>
+            </aside>
+
+            <div class="space-y-3">
+              <div class="rounded-lg border border-[#e5e3df] p-4">
+                <div class="mb-3 flex items-center justify-between">
+                  <p class="font-semibold">第 1 天 · 轻松适应</p>
+                  <span class="rounded bg-[#fef7d6] px-2 py-1 text-xs font-semibold">上午 / 下午 / 晚上</span>
                 </div>
-                <div class="flex h-12 w-12 items-center justify-center rounded-full border border-[#c6a15b]/40 bg-[#c6a15b]/12 text-[#d8bf86]">
-                  <MapPinned class="h-5 w-5" aria-hidden="true" />
+                <div class="space-y-2 text-sm text-[#5d5b54]">
+                  <p class="rounded-md bg-[#fafaf9] px-3 py-2">办理入住，熟悉周边环境</p>
+                  <p class="rounded-md bg-[#fafaf9] px-3 py-2">慢逛历史街区和茶庭</p>
+                  <p class="rounded-md bg-[#fafaf9] px-3 py-2">住处附近安排晚餐</p>
                 </div>
               </div>
-
-              <div class="mt-10 grid gap-7 sm:grid-cols-[0.72fr_1fr]">
-                <div class="rounded-[1.6rem] border border-[#f3ebdd]/10 bg-[#f3ebdd]/7 p-5">
-                  <p class="text-xs font-bold uppercase tracking-[0.26em] text-[#c6a15b]">偏好</p>
-                  <p class="mt-4 text-sm leading-7 text-[#d8d0bf]">慢节奏早晨、本地餐桌、少一点奔波，多一点停留。</p>
+              <div class="grid gap-3 sm:grid-cols-2">
+                <div class="rounded-lg bg-[#dcecfa] p-4">
+                  <p class="text-sm font-semibold">交通提醒</p>
+                  <p class="mt-2 text-sm text-[#37352f]">同一天尽量少跨区。</p>
                 </div>
-                <ol class="relative space-y-5 border-l border-[#c6a15b]/35 pl-6">
-                  <li v-for="stop in manuscriptStops" :key="stop" class="relative text-sm leading-6 text-[#e7deca]">
-                    <span class="absolute -left-[1.9rem] top-1.5 h-3 w-3 rounded-full border border-[#c6a15b] bg-[#111917]" />
-                    {{ stop }}
-                  </li>
-                </ol>
-              </div>
-
-              <div class="mt-8 rounded-[1.7rem] border border-[#7b9c8d]/25 bg-[#7b9c8d]/10 p-5">
-                <p class="text-xs font-bold uppercase tracking-[0.26em] text-[#91b5a5]">输出形式</p>
-                <p class="mt-3 text-sm leading-7 text-[#d8d0bf]">每日主题、三段日程、补充备注和出发前提醒。</p>
+                <div class="rounded-lg bg-[#fde0ec] p-4">
+                  <p class="text-sm font-semibold">预约提醒</p>
+                  <p class="mt-2 text-sm text-[#37352f]">出发前核对开放时间。</p>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </section>
+      </div>
+    </section>
 
-      <section id="inspiration" class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
-        <div class="grid gap-6 md:grid-cols-[0.9fr_1.1fr] md:items-end">
-          <div>
-            <p class="text-xs font-bold uppercase tracking-[0.32em] text-[#c6a15b]">目的地气质</p>
-            <h2 class="mt-4 max-w-2xl text-3xl font-semibold tracking-[-0.05em] text-[#fff8ea] [font-family:'Noto_Serif_SC','Songti_SC',serif] sm:text-5xl">先确定旅程的质地，再安排每一天。</h2>
-          </div>
-          <p class="max-w-xl text-sm leading-7 text-[#cfc3ad] sm:text-base">
-            高级感不是堆满景点，而是知道哪里该停、哪里该绕路、哪里只需要一杯咖啡的时间。
+    <section id="destinations" class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+      <div class="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+        <div>
+          <p class="text-xs font-semibold uppercase text-[#5645d4]">Destinations</p>
+          <h2 class="mt-3 text-4xl font-semibold leading-tight">先选旅程的质地。</h2>
+        </div>
+        <p class="max-w-xl text-base leading-7 text-[#5d5b54]">
+          页面不再堆装饰，把目的地灵感、规划表单和生成结果放在同一条清楚路径上。
+        </p>
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <article v-for="destination in destinations" :key="destination.name" class="rounded-xl border border-[#e5e3df] p-5" :class="destination.tint">
+          <p class="text-xs font-semibold text-[#5d5b54]">{{ destination.accent }}</p>
+          <h3 class="mt-4 text-3xl font-semibold">{{ destination.name }}</h3>
+          <p class="mt-4 text-sm leading-6 text-[#37352f]">{{ destination.description }}</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="planner" class="bg-[#f6f5f4] px-4 py-16 sm:px-6 lg:px-8">
+      <div class="mx-auto max-w-7xl">
+        <div class="mb-8 max-w-3xl">
+          <p class="text-xs font-semibold uppercase text-[#5645d4]">Planner</p>
+          <h2 class="mt-3 text-4xl font-semibold leading-tight">把想法交给一张清楚的行程单。</h2>
+          <p id="planner-helper" class="mt-4 text-base leading-7 text-[#5d5b54]">
+            保留原来的生成能力，只把表单和结果区改成更像工作台的双栏布局。
           </p>
         </div>
 
-        <div class="mt-10 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <article v-for="destination in destinations" :key="destination.name" class="group rounded-[2rem] border border-[#f3ebdd]/12 bg-[#f3ebdd]/[0.07] p-5 shadow-2xl shadow-black/10 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-[#c6a15b]/45 hover:bg-[#f3ebdd]/[0.095]">
-            <p class="text-xs font-bold uppercase tracking-[0.22em] text-[#91b5a5]">{{ destination.accent }}</p>
-            <h3 class="mt-5 text-3xl font-semibold tracking-[-0.05em] text-[#fff8ea] [font-family:'Noto_Serif_SC','Songti_SC',serif]">{{ destination.name }}</h3>
-            <p class="mt-4 min-h-20 text-sm leading-7 text-[#d8d0bf]">{{ destination.description }}</p>
-            <div class="mt-6 flex flex-wrap gap-2">
-              <span v-for="tag in destination.tags" :key="tag" class="rounded-full border border-[#c6a15b]/22 bg-[#c6a15b]/10 px-3 py-1 text-xs font-semibold text-[#dcc793]">
-                {{ tag }}
-              </span>
-            </div>
-          </article>
-        </div>
-      </section>
-
-      <section id="planner" class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
-        <div class="mb-10 max-w-3xl">
-          <p class="text-xs font-bold uppercase tracking-[0.32em] text-[#91b5a5]">写路线</p>
-          <h2 class="mt-4 text-3xl font-semibold tracking-[-0.05em] text-[#fff8ea] [font-family:'Noto_Serif_SC','Songti_SC',serif] sm:text-5xl">把想法交给一张清楚的行程单。</h2>
-          <p id="planner-helper" class="mt-5 text-base leading-8 text-[#cfc3ad]">
-            这不是最终答案，而是一份可继续修改的初稿。先让路线有形，再决定删掉什么、保留什么。
-          </p>
-        </div>
-
-        <div class="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-          <form class="rounded-[2.25rem] border border-[#f3ebdd]/14 bg-[#f3ebdd]/[0.075] p-5 shadow-[0_28px_90px_rgba(0,0,0,0.25)] backdrop-blur-2xl sm:p-7" :aria-describedby="error ? 'planner-error' : 'planner-helper'" @submit.prevent="createPlan">
-            <div class="mb-7 flex items-start justify-between gap-4">
+        <div class="grid gap-6 lg:grid-cols-[420px_1fr]">
+          <form class="rounded-xl border border-[#e5e3df] bg-white p-5 sm:p-6" :aria-describedby="error ? 'planner-error' : 'planner-helper'" @submit.prevent="createPlan">
+            <div class="mb-6 flex items-center justify-between gap-4">
               <div>
-                <p class="text-xs font-bold uppercase tracking-[0.28em] text-[#c6a15b]">Route Brief</p>
-                <h3 class="mt-2 text-2xl font-semibold tracking-[-0.04em] text-[#fff8ea] [font-family:'Noto_Serif_SC','Songti_SC',serif]">写下这次出发</h3>
+                <p class="text-xs font-semibold text-[#787671]">Route brief</p>
+                <h3 class="mt-1 text-2xl font-semibold">这次出发</h3>
               </div>
-              <div class="hidden h-12 w-12 items-center justify-center rounded-full border border-[#c6a15b]/30 bg-[#c6a15b]/10 text-[#d8bf86] sm:flex">
-                <Compass class="h-5 w-5" aria-hidden="true" />
-              </div>
+              <Sparkles class="h-6 w-6 text-[#5645d4]" aria-hidden="true" />
             </div>
 
-            <div class="space-y-5">
+            <div class="space-y-4">
               <label class="block">
-                <span class="text-sm font-semibold text-[#f3ebdd]">目的地</span>
+                <span class="text-sm font-medium">目的地</span>
                 <input
                   v-model="form.destination"
                   :aria-invalid="destinationHasError ? 'true' : undefined"
                   :aria-describedby="error ? 'planner-error' : undefined"
-                  class="mt-2 min-h-12 w-full rounded-2xl border border-[#f3ebdd]/14 bg-[#080d0e]/65 px-4 py-3 text-[#fff8ea] outline-none ring-[#c6a15b]/35 transition placeholder:text-[#7f7769] focus:border-[#c6a15b]/60 focus:ring-4"
+                  class="mt-2 h-11 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]"
                   placeholder="京都"
                 />
               </label>
 
               <div class="grid gap-4 sm:grid-cols-2">
                 <label class="block">
-                  <span class="text-sm font-semibold text-[#f3ebdd]">出发地</span>
-                  <input
-                    v-model="form.origin"
-                    class="mt-2 min-h-12 w-full rounded-2xl border border-[#f3ebdd]/14 bg-[#080d0e]/65 px-4 py-3 text-[#fff8ea] outline-none ring-[#c6a15b]/35 transition placeholder:text-[#7f7769] focus:border-[#c6a15b]/60 focus:ring-4"
-                    placeholder="上海"
-                  />
+                  <span class="text-sm font-medium">出发地</span>
+                  <input v-model="form.origin" class="mt-2 h-11 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" placeholder="上海" />
                 </label>
 
                 <label class="block">
-                  <span class="text-sm font-semibold text-[#f3ebdd]">旅行天数</span>
-                  <input
-                    v-model.number="form.days"
-                    min="1"
-                    max="14"
-                    type="number"
-                    class="mt-2 min-h-12 w-full rounded-2xl border border-[#f3ebdd]/14 bg-[#080d0e]/65 px-4 py-3 text-[#fff8ea] outline-none ring-[#c6a15b]/35 transition focus:border-[#c6a15b]/60 focus:ring-4"
-                  />
+                  <span class="text-sm font-medium">旅行天数</span>
+                  <input v-model.number="form.days" min="1" max="14" type="number" class="mt-2 h-11 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" />
                 </label>
               </div>
 
               <div class="grid gap-4 sm:grid-cols-2">
                 <label class="block">
-                  <span class="text-sm font-semibold text-[#f3ebdd]">预算</span>
-                  <select
-                    v-model="form.budget"
-                    class="mt-2 min-h-12 w-full rounded-2xl border border-[#f3ebdd]/14 bg-[#080d0e]/65 px-4 py-3 text-[#fff8ea] outline-none ring-[#c6a15b]/35 transition focus:border-[#c6a15b]/60 focus:ring-4"
-                  >
-                    <option v-for="option in budgetOptions" :key="option.value" :value="option.value" class="bg-[#0b1012] text-[#fff8ea]">
-                      {{ option.label }}
-                    </option>
+                  <span class="text-sm font-medium">预算</span>
+                  <select v-model="form.budget" class="mt-2 h-11 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]">
+                    <option v-for="option in budgetOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
                   </select>
                 </label>
 
                 <label class="block">
-                  <span class="text-sm font-semibold text-[#f3ebdd]">旅行风格</span>
-                  <select
-                    v-model="form.travel_style"
-                    class="mt-2 min-h-12 w-full rounded-2xl border border-[#f3ebdd]/14 bg-[#080d0e]/65 px-4 py-3 text-[#fff8ea] outline-none ring-[#c6a15b]/35 transition focus:border-[#c6a15b]/60 focus:ring-4"
-                  >
-                    <option v-for="option in styleOptions" :key="option.value" :value="option.value" class="bg-[#0b1012] text-[#fff8ea]">
-                      {{ option.label }}
-                    </option>
+                  <span class="text-sm font-medium">旅行风格</span>
+                  <select v-model="form.travel_style" class="mt-2 h-11 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]">
+                    <option v-for="option in styleOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
                   </select>
                 </label>
               </div>
 
               <label class="block">
-                <span class="text-sm font-semibold text-[#f3ebdd]">出行月份</span>
-                <input
-                  v-model="form.month"
-                  class="mt-2 min-h-12 w-full rounded-2xl border border-[#f3ebdd]/14 bg-[#080d0e]/65 px-4 py-3 text-[#fff8ea] outline-none ring-[#c6a15b]/35 transition placeholder:text-[#7f7769] focus:border-[#c6a15b]/60 focus:ring-4"
-                  placeholder="10月"
-                />
+                <span class="text-sm font-medium">出行月份</span>
+                <input v-model="form.month" class="mt-2 h-11 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" placeholder="10月" />
               </label>
 
               <label class="block">
-                <span class="text-sm font-semibold text-[#f3ebdd]">补充偏好</span>
-                <textarea
-                  v-model="form.notes"
-                  rows="4"
-                  class="mt-2 w-full rounded-2xl border border-[#f3ebdd]/14 bg-[#080d0e]/65 px-4 py-3 text-[#fff8ea] outline-none ring-[#c6a15b]/35 transition placeholder:text-[#7f7769] focus:border-[#c6a15b]/60 focus:ring-4"
-                  placeholder="美食、节奏、必去地点、同行人情况等..."
-                />
+                <span class="text-sm font-medium">补充偏好</span>
+                <textarea v-model="form.notes" rows="4" class="mt-2 w-full rounded-md border border-[#c8c4be] bg-white px-3 py-2 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" placeholder="美食、节奏、必去地点、同行人情况等..." />
               </label>
 
-              <p v-if="error" id="planner-error" class="rounded-2xl border border-[#d69a88]/40 bg-[#6e2c2c]/45 px-4 py-3 text-sm font-semibold leading-6 text-[#ffd9cf]" role="alert">
+              <p v-if="error" id="planner-error" class="rounded-md border border-[#e03131]/30 bg-[#fde0ec] px-3 py-2 text-sm font-medium text-[#a02e6d]" role="alert">
                 {{ error }}
               </p>
 
-              <button
-                type="submit"
-                :disabled="!canSubmit"
-                class="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#c6a15b] px-5 py-3 font-black text-[#0b1012] shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:bg-[#e2c98e] focus:outline-none focus:ring-2 focus:ring-[#c6a15b] focus:ring-offset-2 focus:ring-offset-[#0b1012] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
-              >
-                {{ isLoading ? '正在整理路线…' : '生成路线草案' }}
+              <button type="submit" :disabled="!canSubmit" class="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-[#5645d4] px-5 py-3 text-sm font-medium text-white hover:bg-[#4534b3] disabled:cursor-not-allowed disabled:bg-[#e5e3df] disabled:text-[#bbb8b1]">
+                {{ isLoading ? '正在整理路线...' : '生成路线草案' }}
                 <ArrowRight class="h-4 w-4" aria-hidden="true" />
               </button>
             </div>
           </form>
 
-          <aside class="rounded-[2.25rem] border border-[#f3ebdd]/14 bg-[#080d0e]/58 p-4 shadow-[0_28px_90px_rgba(0,0,0,0.28)] backdrop-blur-2xl sm:p-6" aria-live="polite" :aria-busy="isLoading">
-            <div class="rounded-[1.8rem] border border-[#f3ebdd]/10 bg-[#f3ebdd]/[0.055] p-5 sm:p-6">
-              <div class="flex items-start justify-between gap-4">
-                <div>
-                  <p class="text-xs font-bold uppercase tracking-[0.28em] text-[#91b5a5]">Route Draft</p>
-                  <h3 class="mt-2 text-2xl font-semibold tracking-[-0.04em] text-[#fff8ea] [font-family:'Noto_Serif_SC','Songti_SC',serif]">路线草案</h3>
-                </div>
-                <div class="flex h-12 w-12 items-center justify-center rounded-full border border-[#7b9c8d]/30 bg-[#7b9c8d]/12 text-[#91b5a5]">
-                  <Route class="h-5 w-5" aria-hidden="true" />
-                </div>
+          <aside class="rounded-xl border border-[#e5e3df] bg-white p-5 sm:p-6" aria-live="polite" :aria-busy="isLoading">
+            <div class="mb-6 flex items-center justify-between gap-4">
+              <div>
+                <p class="text-xs font-semibold text-[#787671]">Route draft</p>
+                <h3 class="mt-1 text-2xl font-semibold">路线草案</h3>
+              </div>
+              <Route class="h-6 w-6 text-[#5645d4]" aria-hidden="true" />
+            </div>
+
+            <div v-if="!plan" class="rounded-xl border border-dashed border-[#c8c4be] bg-[#fafaf9] p-6">
+              <h4 class="text-2xl font-semibold">还没有路线草案。</h4>
+              <p class="mt-3 max-w-2xl leading-7 text-[#5d5b54]">
+                填写左侧信息后，这里会出现按天整理的上午、下午、晚上安排，以及出发前提醒。
+              </p>
+              <div class="mt-6 grid gap-3 sm:grid-cols-3">
+                <div class="rounded-lg bg-[#ffe8d4] p-4 text-sm font-medium">上午 · 轻一点开始</div>
+                <div class="rounded-lg bg-[#e6e0f5] p-4 text-sm font-medium">下午 · 安排重点</div>
+                <div class="rounded-lg bg-[#d9f3e1] p-4 text-sm font-medium">晚上 · 留给回味</div>
+              </div>
+            </div>
+
+            <div v-else class="space-y-4">
+              <div class="rounded-xl bg-[#f9e79f] p-5">
+                <p class="text-xs font-semibold text-[#523410]">{{ plan.trip_id }}</p>
+                <h2 class="mt-2 text-3xl font-semibold">{{ plan.destination }}</h2>
+                <p class="mt-3 leading-7 text-[#37352f]">{{ plan.summary }}</p>
               </div>
 
-              <div v-if="!plan" class="mt-8 rounded-[2rem] border border-dashed border-[#7b9c8d]/35 bg-[linear-gradient(135deg,rgba(123,156,141,0.12),rgba(243,235,221,0.045))] p-6">
-                <p class="text-2xl font-semibold tracking-[-0.04em] text-[#fff8ea] [font-family:'Noto_Serif_SC','Songti_SC',serif]">还没有路线草案。</p>
-                <p class="mt-3 leading-7 text-[#d8d0bf]">
-                  填写左侧信息后，这里会出现按天整理的上午、下午、晚上安排，以及需要出发前核对的提醒。
-                </p>
-                <div class="mt-6 grid gap-3 sm:grid-cols-3">
-                  <div class="rounded-2xl bg-[#f3ebdd]/8 p-4">
-                    <p class="text-xs font-bold text-[#c6a15b]">上午</p>
-                    <p class="mt-2 text-sm text-[#d8d0bf]">轻一点开始</p>
+              <article v-for="day in plan.days" :key="day.day" class="rounded-xl border border-[#e5e3df] p-5">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p class="text-xs font-semibold text-[#5645d4]">第 {{ day.day }} 天</p>
+                    <h3 class="mt-1 text-xl font-semibold">{{ day.title }}</h3>
                   </div>
-                  <div class="rounded-2xl bg-[#f3ebdd]/8 p-4">
-                    <p class="text-xs font-bold text-[#c6a15b]">下午</p>
-                    <p class="mt-2 text-sm text-[#d8d0bf]">安排重点</p>
-                  </div>
-                  <div class="rounded-2xl bg-[#f3ebdd]/8 p-4">
-                    <p class="text-xs font-bold text-[#c6a15b]">晚上</p>
-                    <p class="mt-2 text-sm text-[#d8d0bf]">留给回味</p>
-                  </div>
-                </div>
-              </div>
-
-              <div v-else class="mt-8 space-y-5">
-                <div class="rounded-[2rem] border border-[#c6a15b]/25 bg-[#c6a15b]/10 p-5">
-                  <p class="text-sm font-bold uppercase tracking-[0.22em] text-[#d8bf86]">{{ plan.trip_id }}</p>
-                  <h2 class="mt-2 text-3xl font-semibold tracking-[-0.05em] text-[#fff8ea] [font-family:'Noto_Serif_SC','Songti_SC',serif]">{{ plan.destination }}</h2>
-                  <p class="mt-3 leading-7 text-[#f0e4cf]">{{ plan.summary }}</p>
+                  <span class="w-fit rounded-md bg-[#e6e0f5] px-2 py-1 text-xs font-semibold text-[#391c57]">{{ day.theme }}</span>
                 </div>
 
-                <article v-for="day in plan.days" :key="day.day" class="rounded-[1.7rem] border border-[#f3ebdd]/10 bg-[#f3ebdd]/[0.065] p-5">
-                  <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <p class="text-xs font-bold uppercase tracking-[0.25em] text-[#91b5a5]">第 {{ day.day }} 天</p>
-                      <h3 class="mt-1 text-xl font-semibold text-[#fff8ea] [font-family:'Noto_Serif_SC','Songti_SC',serif]">{{ day.title }}</h3>
-                    </div>
-                    <span class="w-fit rounded-full border border-[#c6a15b]/30 bg-[#c6a15b]/12 px-3 py-1 text-xs font-bold text-[#dcc793]">
-                      {{ day.theme }}
-                    </span>
+                <dl class="mt-5 grid gap-3 md:grid-cols-3">
+                  <div class="rounded-lg bg-[#fafaf9] p-4">
+                    <dt class="font-semibold">上午</dt>
+                    <dd class="mt-2 text-sm leading-6 text-[#5d5b54]">{{ day.morning }}</dd>
                   </div>
+                  <div class="rounded-lg bg-[#fafaf9] p-4">
+                    <dt class="font-semibold">下午</dt>
+                    <dd class="mt-2 text-sm leading-6 text-[#5d5b54]">{{ day.afternoon }}</dd>
+                  </div>
+                  <div class="rounded-lg bg-[#fafaf9] p-4">
+                    <dt class="font-semibold">晚上</dt>
+                    <dd class="mt-2 text-sm leading-6 text-[#5d5b54]">{{ day.evening }}</dd>
+                  </div>
+                </dl>
 
-                  <dl class="mt-5 space-y-4 text-sm leading-6 text-[#d8d0bf]">
-                    <div class="rounded-2xl bg-[#080d0e]/42 p-4">
-                      <dt class="font-bold text-[#fff8ea]">上午</dt>
-                      <dd class="mt-1">{{ day.morning }}</dd>
-                    </div>
-                    <div class="rounded-2xl bg-[#080d0e]/42 p-4">
-                      <dt class="font-bold text-[#fff8ea]">下午</dt>
-                      <dd class="mt-1">{{ day.afternoon }}</dd>
-                    </div>
-                    <div class="rounded-2xl bg-[#080d0e]/42 p-4">
-                      <dt class="font-bold text-[#fff8ea]">晚上</dt>
-                      <dd class="mt-1">{{ day.evening }}</dd>
-                    </div>
-                  </dl>
+                <ul class="mt-4 list-disc space-y-1 pl-5 text-sm leading-6 text-[#5d5b54]">
+                  <li v-for="note in day.notes" :key="note">{{ note }}</li>
+                </ul>
+              </article>
 
-                  <ul class="mt-4 list-disc space-y-1 pl-5 text-sm leading-6 text-[#cfc3ad]">
-                    <li v-for="note in day.notes" :key="note">{{ note }}</li>
-                  </ul>
-                </article>
-
-                <div class="rounded-[1.7rem] border border-[#7b9c8d]/24 bg-[#7b9c8d]/10 p-5">
-                  <h3 class="font-bold text-[#fff8ea]">出发前提醒</h3>
-                  <ul class="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-[#d8d0bf]">
-                    <li v-for="tip in plan.tips" :key="tip">{{ tip }}</li>
-                  </ul>
-                  <p class="mt-4 border-t border-[#f3ebdd]/10 pt-4 text-xs font-semibold uppercase tracking-[0.18em] text-[#afa58f]">
-                    {{ plan.disclaimer }}
-                  </p>
-                </div>
+              <div class="rounded-xl bg-[#d9f3e1] p-5">
+                <h3 class="font-semibold">出发前提醒</h3>
+                <ul class="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-[#37352f]">
+                  <li v-for="tip in plan.tips" :key="tip">{{ tip }}</li>
+                </ul>
+                <p class="mt-4 border-t border-[#1aae39]/20 pt-4 text-xs font-semibold text-[#5d5b54]">{{ plan.disclaimer }}</p>
               </div>
             </div>
           </aside>
         </div>
-      </section>
+      </div>
+    </section>
 
-      <section id="features" class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
-        <div class="max-w-3xl">
-          <p class="text-xs font-bold uppercase tracking-[0.32em] text-[#c6a15b]">方法</p>
-          <h2 class="mt-4 text-3xl font-semibold tracking-[-0.05em] text-[#fff8ea] [font-family:'Noto_Serif_SC','Songti_SC',serif] sm:text-5xl">一份好路线，需要四个层次。</h2>
-        </div>
-
-        <div class="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <article v-for="feature in features" :key="feature.title" class="rounded-[2rem] border border-[#f3ebdd]/12 bg-[#f3ebdd]/[0.07] p-6 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-[#7b9c8d]/45 hover:bg-[#f3ebdd]/[0.095]">
-            <div class="flex h-12 w-12 items-center justify-center rounded-full border border-[#c6a15b]/25 bg-[#c6a15b]/10 text-[#d8bf86]">
-              <component :is="feature.icon" class="h-5 w-5" aria-hidden="true" />
-            </div>
-            <h3 class="mt-6 text-xl font-semibold text-[#fff8ea] [font-family:'Noto_Serif_SC','Songti_SC',serif]">{{ feature.title }}</h3>
-            <p class="mt-3 text-sm leading-7 text-[#d8d0bf]">{{ feature.description }}</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
-        <div class="rounded-[2.5rem] border border-[#f3ebdd]/14 bg-[#f3ebdd]/[0.07] p-6 shadow-[0_28px_90px_rgba(0,0,0,0.24)] backdrop-blur-2xl sm:p-8 lg:p-10">
-          <div class="grid gap-8 lg:grid-cols-[0.82fr_1.18fr] lg:items-center">
-            <div>
-              <p class="text-xs font-bold uppercase tracking-[0.32em] text-[#91b5a5]">适用场景</p>
-              <h2 class="mt-4 text-3xl font-semibold tracking-[-0.05em] text-[#fff8ea] [font-family:'Noto_Serif_SC','Songti_SC',serif] sm:text-5xl">它适合在决定之前使用。</h2>
-            </div>
-            <div class="grid gap-4 md:grid-cols-3">
-              <article v-for="useCase in useCases" :key="useCase.title" class="rounded-[1.6rem] border border-[#f3ebdd]/10 bg-[#080d0e]/42 p-5">
-                <h3 class="font-semibold text-[#fff8ea] [font-family:'Noto_Serif_SC','Songti_SC',serif]">{{ useCase.title }}</h3>
-                <p class="mt-3 text-sm leading-7 text-[#d8d0bf]">{{ useCase.description }}</p>
-              </article>
-            </div>
+    <section id="features" class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+      <div class="rounded-xl bg-[#f9e79f] p-6 sm:p-8 lg:p-10">
+        <div class="grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
+          <div>
+            <p class="text-xs font-semibold uppercase text-[#523410]">Method</p>
+            <h2 class="mt-3 text-4xl font-semibold leading-tight">一份好路线，需要四个层次。</h2>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <article v-for="feature in features" :key="feature.title" class="rounded-xl border border-[#e5e3df] bg-white p-5">
+              <component :is="feature.icon" class="h-6 w-6 text-[#5645d4]" aria-hidden="true" />
+              <h3 class="mt-4 text-xl font-semibold">{{ feature.title }}</h3>
+              <p class="mt-3 text-sm leading-6 text-[#5d5b54]">{{ feature.description }}</p>
+            </article>
           </div>
         </div>
-      </section>
-
-      <section class="mx-auto max-w-5xl px-4 py-20 text-center sm:px-6 lg:px-8">
-        <p class="text-xs font-bold uppercase tracking-[0.32em] text-[#c6a15b]">从一座城市开始</p>
-        <h2 class="mt-4 text-4xl font-semibold tracking-[-0.06em] text-[#fff8ea] [font-family:'Noto_Serif_SC','Songti_SC',serif] sm:text-6xl">先写一版路线，再慢慢删改。</h2>
-        <p class="mx-auto mt-5 max-w-2xl text-base leading-8 text-[#cfc3ad]">
-          旅行计划最难的是开始。把目的地写下来，让第一版日程先出现。
-        </p>
-        <a href="#planner" class="mt-9 inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-[#c6a15b] px-8 py-3 font-black text-[#0b1012] shadow-xl shadow-black/20 transition hover:-translate-y-0.5 hover:bg-[#e2c98e] focus:outline-none focus:ring-2 focus:ring-[#c6a15b] focus:ring-offset-2 focus:ring-offset-[#0b1012]">
-          开始写路线
-          <ArrowRight class="h-4 w-4" aria-hidden="true" />
-        </a>
-      </section>
-    </div>
+      </div>
+    </section>
   </main>
 </template>

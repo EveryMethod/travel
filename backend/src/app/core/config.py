@@ -10,8 +10,11 @@ class Settings(BaseSettings):
     app_name: str = "AI Travel Planner API"
     app_env: str = "development"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
-    supabase_url: str = ""
-    supabase_anon_key: str = ""
+    mysql_host: str = "127.0.0.1"
+    mysql_port: int = 13306
+    mysql_user: str = "travel"
+    mysql_password: str = ""
+    mysql_database: str = "travel"
 
     model_config = SettingsConfigDict(
         env_file=".env",
