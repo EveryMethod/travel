@@ -2,10 +2,12 @@
 
 from fastapi import APIRouter, HTTPException
 
+from src.app.api.auth import router as auth_router
 from src.app.graph.trip_planner import plan_trip_with_graph
 from src.app.models.trip import TripPlanRequest, TripPlanResponse
 
 api_router = APIRouter()
+api_router.include_router(auth_router)
 
 
 @api_router.get("/health")

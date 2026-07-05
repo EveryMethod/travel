@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { Chrome, Eye, EyeOff } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
+import { Eye, EyeOff } from 'lucide-vue-next'
+import { getOAuthAuthorizeUrl, login as loginAccount, register as registerAccount, saveAuthTokens } from '@/services'
+import type { AuthResponse, OAuthProvider } from '@/types'
 
 type Mood = 'idle' | 'email' | 'password' | 'peek' | 'fail' | 'success'
+type AuthMode = 'login' | 'register'
 
 type CharacterTone = 'orange' | 'purple' | 'black' | 'yellow'
 
@@ -24,19 +28,31 @@ const form = reactive({
   password: '',
   remember: false,
 })
+const registerForm = reactive({
+  email: '',
+  username: '',
+  password: '',
+  confirmPassword: '',
+  remember: false,
+})
 
+const router = useRouter()
+const authMode = ref<AuthMode>('login')
 const mood = ref<Mood>('idle')
 const passwordVisible = ref(false)
 const message = ref('')
+const oauthLoading = ref<OAuthProvider | null>(null)
 const pointer = reactive({ x: 0, y: 0 })
 const emailInput = ref<HTMLInputElement | null>(null)
 const passwordInput = ref<HTMLInputElement | null>(null)
 const characterEls = ref<Array<HTMLElement | null>>([])
 let resultTimer: number | undefined
 let pointerFrame: number | undefined
+let oauthWindow: Window | null = null
 let nextPointer = { x: 0, y: 0 }
 
 const canSubmit = computed(() => form.email.trim().length > 0 && form.password.length > 0)
+const canRegister = computed(() => registerForm.password.length >= 8 && registerForm.confirmPassword.length > 0)
 const isResultMood = computed(() => mood.value === 'fail' || mood.value === 'success')
 
 function setCharacterRef(el: unknown, index: number) {
@@ -145,15 +161,17 @@ async function togglePassword() {
   passwordInput.value?.focus()
 }
 
-function submitLogin() {
+async function submitLogin() {
   if (!canSubmit.value) return
 
-  if (form.email.includes('@') && form.password === 'travel123') {
+  try {
+    await loginAccount({ account: form.email.trim(), password: form.password }, form.remember)
     mood.value = 'success'
-    message.value = 'Login successful. Welcome back!'
-  } else {
+    message.value = '登录成功，正在进入首页。'
+    await router.push('/home')
+  } catch (error) {
     mood.value = 'fail'
-    message.value = 'Login failed. Try travel123 as the demo password.'
+    message.value = error instanceof Error ? error.message : '登录失败，请检查账号或密码。'
   }
 
   clearResultTimer()
@@ -172,14 +190,119 @@ function submitLogin() {
   }, 2200)
 }
 
+function switchAuthMode(nextMode: AuthMode) {
+  authMode.value = nextMode
+  message.value = ''
+  passwordVisible.value = false
+  setMood('idle')
+}
+
+async function submitRegister() {
+  if (!canRegister.value) return
+
+  const email = registerForm.email.trim()
+  const username = registerForm.username.trim()
+
+  if (!email && !username) {
+    mood.value = 'fail'
+    message.value = '请填写邮箱或用户名。'
+    return
+  }
+
+  if (registerForm.password.length < 8) {
+    mood.value = 'fail'
+    message.value = '密码至少需要 8 位。'
+    return
+  }
+
+  if (registerForm.password !== registerForm.confirmPassword) {
+    mood.value = 'fail'
+    message.value = '两次输入的密码不一致。'
+    return
+  }
+
+  try {
+    await registerAccount(
+      {
+        display_name: username || email.split('@')[0],
+        password: registerForm.password,
+        ...(email ? { email } : {}),
+        ...(username ? { username } : {}),
+      },
+      registerForm.remember,
+    )
+    mood.value = 'success'
+    message.value = '注册成功，正在进入首页。'
+    await router.push('/home')
+  } catch (error) {
+    mood.value = 'fail'
+    message.value = error instanceof Error ? error.message : '注册失败，请稍后重试。'
+  }
+}
+
+async function loginWithOAuth(provider: OAuthProvider) {
+  if (oauthLoading.value) return
+
+  oauthLoading.value = provider
+  message.value = ''
+  setMood('peek')
+
+  try {
+    const { authorization_url } = await getOAuthAuthorizeUrl(provider)
+    const width = 520
+    const height = 680
+    const left = Math.max(window.screenX + (window.outerWidth - width) / 2, 0)
+    const top = Math.max(window.screenY + (window.outerHeight - height) / 2, 0)
+    oauthWindow = window.open(
+      authorization_url,
+      `travel-${provider}-login`,
+      `width=${width},height=${height},left=${left},top=${top},popup=yes`,
+    )
+
+    if (!oauthWindow) {
+      window.location.assign(authorization_url)
+    }
+  } catch (error) {
+    mood.value = 'fail'
+    message.value = error instanceof Error ? error.message : '第三方登录暂时不可用，请稍后重试。'
+    oauthLoading.value = null
+  }
+}
+
+function handleOAuthMessage(event: MessageEvent) {
+  if (event.origin !== window.location.origin) return
+
+  const data = event.data as { type?: string; auth?: AuthResponse; message?: string }
+  if (data.type === 'travel:oauth-success' && data.auth) {
+    saveAuthTokens(data.auth.tokens, form.remember)
+    oauthWindow?.close()
+    oauthWindow = null
+    oauthLoading.value = null
+    mood.value = 'success'
+    message.value = '登录成功，欢迎回来。'
+    router.push('/home')
+    return
+  }
+
+  if (data.type === 'travel:oauth-error') {
+    oauthWindow?.close()
+    oauthWindow = null
+    oauthLoading.value = null
+    mood.value = 'fail'
+    message.value = data.message || '第三方登录失败，请重试。'
+  }
+}
+
 onMounted(() => {
   pointer.x = window.innerWidth * 0.28
   pointer.y = window.innerHeight * 0.36
+  window.addEventListener('message', handleOAuthMessage)
 })
 
 onUnmounted(() => {
   clearResultTimer()
   if (pointerFrame) window.cancelAnimationFrame(pointerFrame)
+  window.removeEventListener('message', handleOAuthMessage)
   characterEls.value = []
 })
 </script>
@@ -210,77 +333,180 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <section class="form-panel" aria-label="Login form">
-      <form class="login-card" @submit.prevent="submitLogin">
-        <div class="brand-mark" aria-hidden="true">
-          <span></span>
-        </div>
+    <section class="form-panel" aria-label="Authentication form">
+      <div class="auth-flip" :class="{ 'is-register': authMode === 'register' }">
+        <form class="login-card auth-face auth-front" @submit.prevent="submitLogin">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span>
+          </div>
 
-        <div class="title-block">
-          <h1>Welcome back!</h1>
-          <p>Please enter your details.</p>
-        </div>
+          <div class="title-block">
+            <h1>Welcome back!</h1>
+            <p>Please enter your details.</p>
+          </div>
 
-        <label class="field" for="login-email">
-          <span>Email</span>
-          <input
-            id="login-email"
-            ref="emailInput"
-            v-model="form.email"
-            type="email"
-            autocomplete="email"
-            placeholder="Enter your email"
-            @focus="focusEmail"
-            @blur="blurField"
-          />
-        </label>
-
-        <label class="field password-field" for="login-password">
-          <span>Password</span>
-          <div class="password-row">
+          <label class="field" for="login-account">
+            <span>Email or username</span>
             <input
-              id="login-password"
-              ref="passwordInput"
-              v-model="form.password"
-              :type="passwordVisible ? 'text' : 'password'"
-              autocomplete="current-password"
-              placeholder="Enter your password"
+              id="login-account"
+              ref="emailInput"
+              v-model="form.email"
+              type="text"
+              autocomplete="username"
+              placeholder="Enter your email or username"
+              @focus="focusEmail"
+              @blur="blurField"
+            />
+          </label>
+
+          <label class="field password-field" for="login-password">
+            <span>Password</span>
+            <div class="password-row">
+              <input
+                id="login-password"
+                ref="passwordInput"
+                v-model="form.password"
+                :type="passwordVisible ? 'text' : 'password'"
+                autocomplete="current-password"
+                placeholder="Enter your password"
+                @focus="focusPassword"
+                @blur="blurField"
+              />
+              <button
+                class="eye-button"
+                type="button"
+                :aria-label="passwordVisible ? 'Hide password' : 'Show password'"
+                @click="togglePassword"
+              >
+                <EyeOff v-if="passwordVisible" :size="22" stroke-width="2.25" />
+                <Eye v-else :size="22" stroke-width="2.25" />
+              </button>
+            </div>
+          </label>
+
+          <div class="form-options">
+            <label class="remember">
+              <input v-model="form.remember" type="checkbox" />
+              <span>Remember me</span>
+            </label>
+            <a href="#" @click.prevent>Forgot password?</a>
+          </div>
+
+          <p v-if="message && authMode === 'login'" class="login-message" :class="mood" role="status" aria-live="polite">
+            {{ message }}
+          </p>
+
+          <button class="login-button" type="submit" :disabled="!canSubmit">Log In</button>
+
+          <div class="oauth-actions" aria-label="Third-party login options">
+            <button class="oauth-button qq" type="button" :disabled="oauthLoading !== null" @click="loginWithOAuth('qq')">
+              <span class="oauth-mark" aria-hidden="true">Q</span>
+              <span>{{ oauthLoading === 'qq' ? '正在前往 QQ...' : 'QQ 登录' }}</span>
+            </button>
+
+            <button
+              class="oauth-button wechat"
+              type="button"
+              :disabled="oauthLoading !== null"
+              @click="loginWithOAuth('wechat')"
+            >
+              <span class="oauth-mark" aria-hidden="true">
+                <span></span>
+                <span></span>
+              </span>
+              <span>{{ oauthLoading === 'wechat' ? '正在前往微信...' : '微信登录' }}</span>
+            </button>
+          </div>
+
+          <p class="signup-copy">
+            Don't have an account? <a href="#" @click.prevent="switchAuthMode('register')">Sign Up</a>
+          </p>
+        </form>
+
+        <form class="login-card auth-face auth-back" @submit.prevent="submitRegister">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span>
+          </div>
+
+          <div class="title-block register-title">
+            <h1>Create account</h1>
+            <p>Start with email or username.</p>
+          </div>
+
+          <label class="field" for="register-email">
+            <span>Email</span>
+            <input
+              id="register-email"
+              v-model="registerForm.email"
+              type="email"
+              autocomplete="email"
+              placeholder="name@example.com"
+              @focus="focusEmail"
+              @blur="blurField"
+            />
+          </label>
+
+          <label class="field" for="register-username">
+            <span>Username</span>
+            <input
+              id="register-username"
+              v-model="registerForm.username"
+              type="text"
+              autocomplete="username"
+              placeholder="Optional if email is filled"
+              @focus="focusEmail"
+              @blur="blurField"
+            />
+          </label>
+
+          <label class="field" for="register-password">
+            <span>Password</span>
+            <input
+              id="register-password"
+              v-model="registerForm.password"
+              type="password"
+              autocomplete="new-password"
+              placeholder="Create a password"
               @focus="focusPassword"
               @blur="blurField"
             />
-            <button
-              class="eye-button"
-              type="button"
-              :aria-label="passwordVisible ? 'Hide password' : 'Show password'"
-              @click="togglePassword"
-            >
-              <EyeOff v-if="passwordVisible" :size="22" stroke-width="2.25" />
-              <Eye v-else :size="22" stroke-width="2.25" />
-            </button>
-          </div>
-        </label>
-
-        <div class="form-options">
-          <label class="remember">
-            <input v-model="form.remember" type="checkbox" />
-            <span>Remember me</span>
           </label>
-          <a href="#" @click.prevent>Forgot password?</a>
-        </div>
 
-        <p v-if="message" class="login-message" :class="mood" role="status" aria-live="polite">
-          {{ message }}
-        </p>
+          <label class="field" for="register-confirm-password">
+            <span>Confirm password</span>
+            <input
+              id="register-confirm-password"
+              v-model="registerForm.confirmPassword"
+              type="password"
+              autocomplete="new-password"
+              placeholder="Repeat your password"
+              @focus="focusPassword"
+              @blur="blurField"
+            />
+          </label>
 
-        <button class="login-button" type="submit" :disabled="!canSubmit">Log In</button>
+          <div class="form-options register-options">
+            <label class="remember">
+              <input v-model="registerForm.remember" type="checkbox" />
+              <span>Remember me</span>
+            </label>
+          </div>
 
-        <button class="google-button" type="button">
-          <Chrome :size="24" stroke-width="2.25" />
-          <span>Log in with Google</span>
-        </button>
+          <p
+            v-if="message && authMode === 'register'"
+            class="login-message"
+            :class="mood"
+            role="status"
+            aria-live="polite"
+          >
+            {{ message }}
+          </p>
 
-        <p class="signup-copy">Don't have an account? <a href="#">Sign Up</a></p>
-      </form>
+          <button class="login-button" type="submit" :disabled="!canRegister">Create Account</button>
+
+          <p class="signup-copy">Already have an account? <a href="#" @click.prevent="switchAuthMode('login')">Log In</a></p>
+        </form>
+      </div>
     </section>
   </main>
 </template>
@@ -657,14 +883,59 @@ onUnmounted(() => {
     linear-gradient(90deg, rgba(247, 247, 247, 0.46), rgba(247, 247, 247, 0.92) 42%, var(--panel-soft));
 }
 
-.login-card {
+.auth-flip {
+  position: relative;
   width: min(100%, 510px);
+  height: min(790px, calc(100svh - clamp(32px, 5vw, 64px)));
+  min-height: 0;
+  perspective: 1600px;
+  transform-style: preserve-3d;
+}
+
+.auth-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  transition:
+    transform 620ms cubic-bezier(0.2, 0.85, 0.25, 1),
+    opacity 240ms ease;
+}
+
+.auth-front {
+  transform: rotateY(0deg);
+}
+
+.auth-back {
+  transform: rotateY(180deg);
+}
+
+.auth-flip.is-register .auth-front {
+  transform: rotateY(-180deg);
+}
+
+.auth-flip.is-register .auth-back {
+  transform: rotateY(0deg);
+}
+
+.login-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  overflow-y: auto;
   padding: clamp(26px, 3.1vw, 40px);
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid rgba(238, 238, 238, 0.86);
   border-radius: 30px;
   box-shadow: var(--soft-shadow);
   backdrop-filter: blur(8px);
+}
+
+.auth-front {
+  justify-content: center;
+}
+
+.auth-back {
+  justify-content: center;
 }
 
 .brand-mark {
@@ -685,6 +956,10 @@ onUnmounted(() => {
 
 .title-block {
   margin: 28px 0 34px;
+}
+
+.register-title {
+  margin-bottom: 18px;
 }
 
 .title-block h1 {
@@ -800,6 +1075,10 @@ onUnmounted(() => {
   font-size: 14px;
 }
 
+.register-options {
+  justify-content: flex-start;
+}
+
 .remember {
   display: inline-flex;
   align-items: center;
@@ -861,7 +1140,7 @@ onUnmounted(() => {
 }
 
 .login-button,
-.google-button {
+.oauth-button {
   width: 100%;
   min-height: 56px;
   border-radius: 999px;
@@ -888,27 +1167,88 @@ onUnmounted(() => {
 }
 
 .login-button:focus-visible,
-.google-button:focus-visible,
+.oauth-button:focus-visible,
 .remember input:focus-visible {
   outline: 3px solid #8431cf;
   outline-offset: 3px;
 }
 
 .login-button:not(:disabled):hover,
-.google-button:hover {
+.oauth-button:hover {
   transform: translateY(-3px);
   box-shadow: 0 14px 28px rgba(20, 20, 20, 0.11);
 }
 
-.google-button {
+.oauth-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.oauth-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 12px;
-  margin-top: 22px;
   color: #111111;
   background: #ffffff;
   border: 2px solid #e6e6e6;
+}
+
+.oauth-button:disabled {
+  cursor: progress;
+  opacity: 0.72;
+}
+
+.oauth-button.qq:hover {
+  border-color: #181818;
+}
+
+.oauth-button.wechat:hover {
+  border-color: #1aad19;
+}
+
+.oauth-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  font-size: 17px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.qq .oauth-mark {
+  color: #ffffff;
+  background: #151515;
+}
+
+.wechat .oauth-mark {
+  position: relative;
+  background: #1aad19;
+}
+
+.wechat .oauth-mark > span {
+  position: absolute;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.wechat .oauth-mark > span:first-child {
+  left: 7px;
+  top: 10px;
+  width: 7px;
+  height: 7px;
+}
+
+.wechat .oauth-mark > span:last-child {
+  right: 7px;
+  top: 10px;
+  width: 7px;
+  height: 7px;
 }
 
 .signup-copy {
@@ -963,9 +1303,13 @@ onUnmounted(() => {
   }
 
   .login-button:not(:disabled):hover,
-  .google-button:hover {
+  .oauth-button:hover {
     transform: none;
     box-shadow: none;
+  }
+
+  .auth-face {
+    transition: none;
   }
 }
 
@@ -1016,6 +1360,10 @@ onUnmounted(() => {
     padding: clamp(14px, 2vw, 22px);
   }
 
+  .auth-flip {
+    height: min(670px, calc(100svh - clamp(28px, 4vw, 44px)));
+  }
+
   .login-card {
     padding: clamp(20px, 2.5vw, 28px);
     border-radius: 24px;
@@ -1063,12 +1411,12 @@ onUnmounted(() => {
   }
 
   .login-button,
-  .google-button {
+  .oauth-button {
     min-height: 50px;
     font-size: 17px;
   }
 
-  .google-button {
+  .oauth-actions {
     margin-top: 16px;
   }
 
@@ -1101,9 +1449,54 @@ onUnmounted(() => {
     padding: 10px;
   }
 
+  .auth-flip {
+    height: calc(100svh - 20px);
+    perspective: none;
+  }
+
+  .auth-face {
+    transition:
+      opacity 260ms ease,
+      transform 260ms ease;
+  }
+
+  .auth-front,
+  .auth-back,
+  .auth-flip.is-register .auth-front,
+  .auth-flip.is-register .auth-back {
+    transform: none;
+  }
+
+  .auth-front {
+    opacity: 1;
+  }
+
+  .auth-back {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(18px);
+  }
+
+  .auth-flip.is-register .auth-front {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-18px);
+  }
+
+  .auth-flip.is-register .auth-back {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
+  }
+
   .login-card {
     padding: 18px;
     border-radius: 20px;
+  }
+
+  .auth-front,
+  .auth-back {
+    justify-content: flex-start;
   }
 
   .brand-mark {
@@ -1178,14 +1571,19 @@ onUnmounted(() => {
   }
 
   .login-button,
-  .google-button {
+  .oauth-button {
     min-height: 44px;
     font-size: 15px;
   }
 
-  .google-button {
+  .oauth-actions {
+    grid-template-columns: 1fr;
     gap: 10px;
     margin-top: 12px;
+  }
+
+  .oauth-button {
+    gap: 10px;
   }
 
   .signup-copy {
@@ -1211,9 +1609,12 @@ onUnmounted(() => {
     padding: clamp(18px, 3vh, 28px) clamp(22px, 3vw, 34px);
   }
 
+  .auth-flip {
+    height: min(600px, calc(100svh - clamp(36px, 6vh, 56px)));
+  }
+
   .login-card {
     align-self: center;
-    width: min(100%, 480px);
     padding: clamp(20px, 2.4vh, 28px) clamp(24px, 2.6vw, 32px);
     border-radius: 26px;
   }
@@ -1275,12 +1676,12 @@ onUnmounted(() => {
   }
 
   .login-button,
-  .google-button {
+  .oauth-button {
     min-height: 48px;
     font-size: 17px;
   }
 
-  .google-button {
+  .oauth-actions {
     margin-top: 16px;
   }
 
@@ -1295,9 +1696,18 @@ onUnmounted(() => {
     padding: 8px;
   }
 
+  .auth-flip {
+    height: calc(100svh - 16px);
+  }
+
   .login-card {
     padding: 16px;
     border-radius: 18px;
+  }
+
+  .auth-front,
+  .auth-back {
+    justify-content: flex-start;
   }
 
   .brand-mark {
@@ -1372,14 +1782,18 @@ onUnmounted(() => {
   }
 
   .login-button,
-  .google-button {
+  .oauth-button {
     min-height: 40px;
     font-size: 14px;
   }
 
-  .google-button {
+  .oauth-actions {
     gap: 8px;
     margin-top: 10px;
+  }
+
+  .oauth-button {
+    gap: 8px;
   }
 
   .signup-copy {
@@ -1401,6 +1815,10 @@ onUnmounted(() => {
 
   .form-panel {
     padding: 7px;
+  }
+
+  .auth-flip {
+    height: calc(100svh - 14px);
   }
 
   .login-card {
@@ -1451,6 +1869,10 @@ onUnmounted(() => {
     transform-origin: left bottom;
   }
 
+  .auth-flip {
+    height: calc(100svh - 20px);
+  }
+
   .login-card {
     padding: 14px;
   }
@@ -1477,6 +1899,10 @@ onUnmounted(() => {
 
   .form-panel {
     padding: 6px;
+  }
+
+  .auth-flip {
+    height: calc(100svh - 12px);
   }
 
   .login-card {
@@ -1524,12 +1950,12 @@ onUnmounted(() => {
   }
 
   .login-button,
-  .google-button {
+  .oauth-button {
     min-height: 38px;
     font-size: 13px;
   }
 
-  .google-button {
+  .oauth-actions {
     margin-top: 8px;
   }
 

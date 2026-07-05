@@ -37,3 +37,44 @@ export interface TripPlanResponse {
   tips: string[]
   disclaimer: string
 }
+
+export type OAuthProvider = 'qq' | 'wechat'
+
+export interface AuthUser {
+  id: number
+  display_name: string
+  avatar_url: string | null
+}
+
+export interface AuthTokens {
+  access_token: string
+  refresh_token: string
+  token_type: string
+  expires_in: number
+}
+
+export interface AuthResponse {
+  user: AuthUser
+  tokens: AuthTokens
+}
+
+export interface RegisterRequest {
+  display_name: string
+  password: string
+  email?: string
+  username?: string
+}
+
+export interface LoginRequest {
+  account: string
+  password: string
+}
+
+export interface RefreshRequest {
+  refresh_token: string
+}
+
+export interface OAuthAuthorizeResponse {
+  authorization_url: string
+  state: string
+}

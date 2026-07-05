@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ArrowRight, CalendarDays, CheckCircle2, Compass, MapPinned, Route, Sparkles } from 'lucide-vue-next'
 
-import { planTrip } from '@/services'
+import { getAuthTokens, logout, planTrip } from '@/services'
 import type { BudgetLevel, TravelStyle, TripPlanResponse } from '@/types'
 
 const budgetOptions: Array<{ label: string; value: BudgetLevel }> = [
@@ -48,6 +49,8 @@ const form = reactive({
 const plan = ref<TripPlanResponse | null>(null)
 const error = ref('')
 const isLoading = ref(false)
+const isLoggedIn = ref(false)
+const router = useRouter()
 
 const canSubmit = computed(() => form.destination.trim().length > 0 && form.days >= 1 && !isLoading.value)
 const destinationHasError = computed(() => error.value.length > 0 && form.destination.trim().length === 0)
@@ -78,6 +81,16 @@ async function createPlan() {
     isLoading.value = false
   }
 }
+
+async function logoutAndReturn() {
+  await logout()
+  isLoggedIn.value = false
+  await router.push('/login')
+}
+
+onMounted(() => {
+  isLoggedIn.value = getAuthTokens() !== null
+})
 </script>
 
 <template>
@@ -98,7 +111,15 @@ async function createPlan() {
         </nav>
 
         <div class="flex items-center gap-2">
-          <RouterLink to="/login" class="rounded-md border border-[#c8c4be] px-3 py-2 text-sm font-medium hover:bg-[#f6f5f4]">
+          <button
+            v-if="isLoggedIn"
+            type="button"
+            class="rounded-md border border-[#c8c4be] px-3 py-2 text-sm font-medium hover:bg-[#f6f5f4]"
+            @click="logoutAndReturn"
+          >
+            退出登录
+          </button>
+          <RouterLink v-else to="/login" class="rounded-md border border-[#c8c4be] px-3 py-2 text-sm font-medium hover:bg-[#f6f5f4]">
             登录
           </RouterLink>
           <a href="#planner" class="rounded-md bg-[#5645d4] px-3 py-2 text-sm font-medium text-white hover:bg-[#4534b3]">
@@ -215,8 +236,8 @@ async function createPlan() {
           </p>
         </div>
 
-        <div class="grid gap-6 lg:grid-cols-[420px_1fr]">
-          <form class="rounded-xl border border-[#e5e3df] bg-white p-5 sm:p-6" :aria-describedby="error ? 'planner-error' : 'planner-helper'" @submit.prevent="createPlan">
+        <div class="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
+          <form class="rounded-xl border border-[#e5e3df] bg-white p-5 sm:p-6 lg:sticky lg:top-24 lg:self-start" :aria-describedby="error ? 'planner-error' : 'planner-helper'" @submit.prevent="createPlan">
             <div class="mb-6 flex items-center justify-between gap-4">
               <div>
                 <p class="text-xs font-semibold text-[#787671]">Route brief</p>
@@ -286,8 +307,8 @@ async function createPlan() {
             </div>
           </form>
 
-          <aside class="rounded-xl border border-[#e5e3df] bg-white p-5 sm:p-6" aria-live="polite" :aria-busy="isLoading">
-            <div class="mb-6 flex items-center justify-between gap-4">
+          <aside class="rounded-xl border border-[#e5e3df] bg-white p-5 sm:p-6 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto" aria-live="polite" :aria-busy="isLoading">
+            <div class="mb-5 flex items-center justify-between gap-4">
               <div>
                 <p class="text-xs font-semibold text-[#787671]">Route draft</p>
                 <h3 class="mt-1 text-2xl font-semibold">路线草案</h3>
@@ -308,44 +329,48 @@ async function createPlan() {
             </div>
 
             <div v-else class="space-y-4">
-              <div class="rounded-xl bg-[#f9e79f] p-5">
-                <p class="text-xs font-semibold text-[#523410]">{{ plan.trip_id }}</p>
-                <h2 class="mt-2 text-3xl font-semibold">{{ plan.destination }}</h2>
-                <p class="mt-3 leading-7 text-[#37352f]">{{ plan.summary }}</p>
+              <div class="grid gap-4 rounded-xl bg-[#f9e79f] p-4 md:grid-cols-[220px_minmax(0,1fr)] md:items-center">
+                <div>
+                  <p class="text-xs font-semibold text-[#523410]">{{ plan.trip_id }}</p>
+                  <h2 class="mt-2 text-3xl font-semibold">{{ plan.destination }}</h2>
+                </div>
+                <p class="text-sm leading-6 text-[#37352f]">{{ plan.summary }}</p>
               </div>
 
-              <article v-for="day in plan.days" :key="day.day" class="rounded-xl border border-[#e5e3df] p-5">
-                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div class="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
+                <article v-for="day in plan.days" :key="day.day" class="rounded-xl border border-[#e5e3df] p-4">
+                <div class="flex items-start justify-between gap-3">
                   <div>
                     <p class="text-xs font-semibold text-[#5645d4]">第 {{ day.day }} 天</p>
-                    <h3 class="mt-1 text-xl font-semibold">{{ day.title }}</h3>
+                    <h3 class="mt-1 text-lg font-semibold leading-snug">{{ day.title }}</h3>
                   </div>
-                  <span class="w-fit rounded-md bg-[#e6e0f5] px-2 py-1 text-xs font-semibold text-[#391c57]">{{ day.theme }}</span>
+                  <span class="shrink-0 rounded-md bg-[#e6e0f5] px-2 py-1 text-xs font-semibold text-[#391c57]">{{ day.theme }}</span>
                 </div>
 
-                <dl class="mt-5 grid gap-3 md:grid-cols-3">
-                  <div class="rounded-lg bg-[#fafaf9] p-4">
+                <dl class="mt-4 grid gap-2">
+                  <div class="rounded-lg bg-[#fafaf9] p-3">
                     <dt class="font-semibold">上午</dt>
-                    <dd class="mt-2 text-sm leading-6 text-[#5d5b54]">{{ day.morning }}</dd>
+                    <dd class="mt-1 text-sm leading-6 text-[#5d5b54]">{{ day.morning }}</dd>
                   </div>
-                  <div class="rounded-lg bg-[#fafaf9] p-4">
+                  <div class="rounded-lg bg-[#fafaf9] p-3">
                     <dt class="font-semibold">下午</dt>
-                    <dd class="mt-2 text-sm leading-6 text-[#5d5b54]">{{ day.afternoon }}</dd>
+                    <dd class="mt-1 text-sm leading-6 text-[#5d5b54]">{{ day.afternoon }}</dd>
                   </div>
-                  <div class="rounded-lg bg-[#fafaf9] p-4">
+                  <div class="rounded-lg bg-[#fafaf9] p-3">
                     <dt class="font-semibold">晚上</dt>
-                    <dd class="mt-2 text-sm leading-6 text-[#5d5b54]">{{ day.evening }}</dd>
+                    <dd class="mt-1 text-sm leading-6 text-[#5d5b54]">{{ day.evening }}</dd>
                   </div>
                 </dl>
 
-                <ul class="mt-4 list-disc space-y-1 pl-5 text-sm leading-6 text-[#5d5b54]">
+                <ul class="mt-3 list-disc space-y-1 pl-5 text-sm leading-6 text-[#5d5b54]">
                   <li v-for="note in day.notes" :key="note">{{ note }}</li>
                 </ul>
               </article>
+              </div>
 
-              <div class="rounded-xl bg-[#d9f3e1] p-5">
+              <div class="rounded-xl bg-[#d9f3e1] p-4">
                 <h3 class="font-semibold">出发前提醒</h3>
-                <ul class="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-[#37352f]">
+                <ul class="mt-3 grid gap-2 text-sm leading-6 text-[#37352f] md:grid-cols-2">
                   <li v-for="tip in plan.tips" :key="tip">{{ tip }}</li>
                 </ul>
                 <p class="mt-4 border-t border-[#1aae39]/20 pt-4 text-xs font-semibold text-[#5d5b54]">{{ plan.disclaimer }}</p>

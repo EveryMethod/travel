@@ -1,7 +1,13 @@
 """Application settings loaded from environment variables."""
 
+from pathlib import Path
+
 from pydantic import Field
+from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
+
+BACKEND_DIR = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
@@ -12,12 +18,33 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     mysql_host: str = "127.0.0.1"
     mysql_port: int = 13306
-    mysql_user: str = "travel"
+    mysql_user: str = "root"
     mysql_password: str = ""
     mysql_database: str = "travel"
+    redis_url: str = "redis://127.0.0.1:16379/0"
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_api_key: str = ""
+    llm_name: str = "gpt-4o-mini"
+    auth_access_token_ttl_seconds: int = 60 * 30
+    auth_refresh_token_ttl_seconds: int = 60 * 60 * 24 * 30
+
+    @computed_field
+    @property
+    def sqlalchemy_database_url(self) -> str:
+        """Build the SQLAlchemy URL without leaking password formatting bugs."""
+
+        return URL.create(
+            "mysql+pymysql",
+            username=self.mysql_user,
+            password=self.mysql_password,
+            host=self.mysql_host,
+            port=self.mysql_port,
+            database=self.mysql_database,
+            query={"charset": "utf8mb4"},
+        ).render_as_string(hide_password=False)
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=BACKEND_DIR / ".env",
         env_file_encoding="utf-8",
     )
 
