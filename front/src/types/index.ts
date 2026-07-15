@@ -1,5 +1,3 @@
-export type BudgetLevel = 'low' | 'medium' | 'high'
-
 export type TravelStyle =
   | 'culture'
   | 'food'
@@ -13,19 +11,30 @@ export interface TripPlanRequest {
   destination: string
   origin: string
   days: number
-  budget: BudgetLevel
-  travel_style: TravelStyle
-  month: string
+  budget: string
+  travel_style: TravelStyle[]
+  start_date: string
+  end_date: string
   notes: string
+}
+
+export interface TripPlanItem {
+  time: string
+  place: string
+  activity: string
+  estimated_cost: string
+  booking_hint: string
+  source_hint: string
 }
 
 export interface TripDay {
   day: number
+  date: string
   title: string
-  theme: string
-  morning: string
-  afternoon: string
-  evening: string
+  weather: string
+  items: TripPlanItem[]
+  daily_budget: string
+  transport: string
   notes: string[]
 }
 

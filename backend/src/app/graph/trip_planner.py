@@ -1,126 +1,294 @@
-"""Minimal LangGraph travel planner skeleton."""
+"""LangGraph agent for MCP-backed trip planning."""
 
+import json
 import re
-from typing import TypedDict
+from collections.abc import Iterator
+from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
+from pydantic import ValidationError
 
-from src.app.models.trip import TripDay, TripPlanRequest, TripPlanResponse
+from src.app.models.trip import TripPlanRequest, TripPlanResponse
+from src.app.services.llm_service import generate_json
+from src.app.services.mcp_client import call_tool
 
 
 class TripPlannerState(TypedDict, total=False):
-    """State passed through the trip planner graph."""
-
     request: TripPlanRequest
+    context: dict[str, Any]
+    draft: dict[str, Any]
     plan: TripPlanResponse
 
 
-_STYLE_THEMES: dict[str, tuple[str, str]] = {
-    "culture": ("寺社街区、城市故事和在地文化", "历史街区"),
-    "food": ("本地市场、特色小店和轻松美食体验", "美食街区"),
-    "nature": ("自然步道、城市绿地和安静观景点", "公园或观景点"),
-    "family": ("节奏舒适、动线简单、适合全家同行", "亲子友好场馆"),
-    "romantic": ("慢步调散步、氛围晚餐和有记忆点的夜晚", "河畔或老街"),
-    "adventure": ("更主动的探索、短途延伸和有惊喜的路线", "步道或近郊目的地"),
-    "relaxed": ("不赶路的安排、留白时间和街区漫游", "生活感街区"),
-}
-
-
 def plan_trip_with_graph(request: TripPlanRequest) -> TripPlanResponse:
-    """Run the local LangGraph planner and return its generated trip plan."""
-
     final_state = _trip_planner_graph.invoke({"request": request})
     return final_state["plan"]
 
 
+def stream_trip_with_graph(request: TripPlanRequest) -> Iterator[dict[str, Any]]:
+    state: TripPlannerState = {"request": request}
+    yield {"type": "status", "message": "正在整理旅行需求..."}
+    state.update(_normalize_request(state))
+    yield {"type": "status", "message": "正在查询目的地、天气和路线数据..."}
+    state.update(_collect_map_context(state))
+    yield {"type": "context", "data": _compact_context(state["context"])}
+    yield {"type": "status", "message": "正在搜索门票、车票和预算参考..."}
+    state.update(_collect_price_context(state))
+    yield {"type": "status", "message": "正在让大模型生成路线草案..."}
+    state.update(_draft_plan(state))
+    yield {"type": "status", "message": "正在校验并整理行程格式..."}
+    state.update(_validate_plan(state))
+    yield {"type": "plan", "data": state["plan"].model_dump()}
+    yield {"type": "done"}
+
+
 def _build_graph():
     graph = StateGraph(TripPlannerState)
-    graph.add_node("draft_itinerary", _draft_itinerary)
-    graph.add_edge(START, "draft_itinerary")
-    graph.add_edge("draft_itinerary", END)
+    graph.add_node("normalize_request", _normalize_request)
+    graph.add_node("collect_map_context", _collect_map_context)
+    graph.add_node("collect_price_context", _collect_price_context)
+    graph.add_node("draft_plan", _draft_plan)
+    graph.add_node("validate_plan", _validate_plan)
+    graph.add_edge(START, "normalize_request")
+    graph.add_edge("normalize_request", "collect_map_context")
+    graph.add_edge("collect_map_context", "collect_price_context")
+    graph.add_edge("collect_price_context", "draft_plan")
+    graph.add_edge("draft_plan", "validate_plan")
+    graph.add_edge("validate_plan", END)
     return graph.compile()
 
 
-def _draft_itinerary(state: TripPlannerState) -> TripPlannerState:
+def _normalize_request(state: TripPlannerState) -> TripPlannerState:
     request = state["request"]
-    return {"request": request, "plan": _build_demo_plan(request)}
+    request.destination = request.destination.strip()
+    request.origin = request.origin.strip()
+    request.budget = request.budget.strip()
+    request.start_date = request.start_date.strip()
+    request.end_date = request.end_date.strip()
+    request.notes = request.notes.strip()
+    return {"request": request}
 
 
-def _build_demo_plan(request: TripPlanRequest) -> TripPlanResponse:
-    style_theme, anchor_place = _STYLE_THEMES[request.travel_style]
-    slug = _slugify(request.destination)
-    month_phrase = f"，出行时间为{request.month}" if request.month else ""
-    origin_phrase = f"，从{request.origin}出发" if request.origin else ""
-    notes_phrase = "。行程已为你的补充偏好预留弹性时间" if request.notes else ""
+def _collect_map_context(state: TripPlannerState) -> TripPlannerState:
+    request = state["request"]
+    keywords = sorted({keyword for style in request.travel_style for keyword in _style_keywords(style)})
+    context: dict[str, Any] = {"pois": [], "weather": None, "routes": []}
 
-    days = [
-        _build_day_plan(
-            day=day,
-            destination=request.destination,
-            style_theme=style_theme,
-            anchor_place=anchor_place,
+    for keyword in keywords:
+        context["pois"].append(
+            call_tool(
+                "amap_search_poi",
+                {"city": request.destination, "keywords": keyword, "offset": 8},
+            )
         )
-        for day in range(1, request.days + 1)
+
+    context["weather"] = call_tool("amap_weather", {"city": request.destination})
+
+    if request.origin:
+        origin = call_tool("amap_geocode", {"address": request.origin})
+        destination = call_tool("amap_geocode", {"address": request.destination})
+        origin_location = _first_location(origin)
+        destination_location = _first_location(destination)
+        if origin_location and destination_location:
+            context["routes"].append(
+                call_tool(
+                    "amap_route_distance",
+                    {"origin": origin_location, "destination": destination_location},
+                )
+            )
+
+    return {"request": request, "context": context}
+
+
+def _collect_price_context(state: TripPlannerState) -> TripPlannerState:
+    request = state["request"]
+    context = state["context"]
+    queries = [
+        f"{request.destination} 景点 门票 价格",
+        f"{request.origin} 到 {request.destination} 车票 高铁 机票 价格",
+        f"{request.destination} 交通 地铁 打车 价格",
+    ]
+    for poi in _compact_context(context)["pois"][:3]:
+        queries.append(f"{poi.get('name')} 门票 价格 预约")
+
+    prices = []
+    for query in queries[:5]:
+        try:
+            prices.append(call_tool("ticket_price_search", {"query": query, "max_results": 2}))
+        except Exception:
+            prices.append({"query": query, "results": []})
+
+    context["prices"] = prices
+    return {"request": request, "context": context}
+
+
+def _draft_plan(state: TripPlannerState) -> TripPlannerState:
+    request = state["request"]
+    context = state["context"]
+    draft = generate_json(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "你是中文旅行规划 Agent。必须只输出 JSON object，字段严格匹配："
+                    "trip_id,destination,summary,days,tips,disclaimer。"
+                    "days 每项包含 day,date,title,weather,items,daily_budget,transport,notes。"
+                    "items 每项包含 time,place,activity,estimated_cost,booking_hint,source_hint。"
+                    "必须按具体日期和时间点安排行程，不要使用上午/下午/晚上作为固定字段。"
+                    "价格只能使用搜索上下文中的参考信息或写约/区间/需查询官方渠道，不要编造精确实时票价。"
+                    "每个日期给 2 到 4 个 items，保持简洁。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "request": request.model_dump(),
+                        "map_context": _compact_context(context),
+                        "price_context": _compact_prices(context.get("prices")),
+                        "constraints": {
+                            "language": "zh-CN",
+                            "days_count": request.days,
+                            "date_range": [request.start_date, request.end_date],
+                            "budget": request.budget,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+    )
+    return {"request": request, "context": context, "draft": draft}
+
+
+def _validate_plan(state: TripPlannerState) -> TripPlannerState:
+    request = state["request"]
+    draft = _normalize_plan_shape(state["draft"])
+
+    try:
+        plan = TripPlanResponse.model_validate(draft)
+    except ValidationError as exc:
+        repaired = generate_json(
+            [
+                {
+                    "role": "system",
+                    "content": "修复 JSON，使其严格符合 TripPlanResponse schema。只输出 JSON object。",
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "errors": [error.get("loc") for error in exc.errors()],
+                            "bad_json": draft,
+                            "required_days": request.days,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ]
+        )
+        plan = TripPlanResponse.model_validate(_normalize_plan_shape(repaired))
+
+    plan.trip_id = plan.trip_id or f"llm-{_slugify(request.destination)}-{request.days}"
+    plan.destination = plan.destination or request.destination
+    plan.days = plan.days[: request.days]
+    if len(plan.days) != request.days:
+        raise ValueError("LLM returned an itinerary with the wrong number of days.")
+    return {"request": request, "plan": plan}
+
+
+def _normalize_plan_shape(value: dict[str, Any]) -> dict[str, Any]:
+    for day in value.get("days", []):
+        if isinstance(day.get("notes"), str):
+            day["notes"] = [day["notes"]]
+        day.setdefault("items", [])
+        for item in day.get("items", []):
+            item.setdefault("estimated_cost", "需查询官方渠道")
+            item.setdefault("booking_hint", "出发前核实官方信息")
+            item.setdefault("source_hint", "价格为搜索参考，需核实")
+    return value
+
+
+def _style_keywords(style: str) -> list[str]:
+    return {
+        "culture": ["博物馆", "历史街区", "文化景点"],
+        "food": ["美食", "餐厅", "小吃"],
+        "nature": ["公园", "自然风景", "观景点"],
+        "family": ["亲子", "乐园", "博物馆"],
+        "romantic": ["夜景", "咖啡", "老街"],
+        "adventure": ["户外", "徒步", "近郊"],
+        "relaxed": ["咖啡", "公园", "街区"],
+    }.get(style, ["景点", "美食", "公园"])
+
+
+def _first_location(data: dict[str, Any]) -> str:
+    geocodes = data.get("geocodes") or []
+    if not geocodes:
+        return ""
+    return str(geocodes[0].get("location") or "")
+
+
+def _compact_context(context: dict[str, Any]) -> dict[str, Any]:
+    pois = []
+    for result in context.get("pois", []):
+        for poi in result.get("pois", [])[:4]:
+            pois.append(
+                {
+                    "name": poi.get("name"),
+                    "type": poi.get("type"),
+                    "address": poi.get("address"),
+                    "location": poi.get("location"),
+                }
+            )
+    return {
+        "pois": pois[:12],
+        "weather": _compact_weather(context.get("weather")),
+        "routes": _compact_routes(context.get("routes")),
+    }
+
+
+def _compact_prices(data: Any) -> list[dict[str, Any]]:
+    prices = []
+    for result in data or []:
+        items = []
+        for item in result.get("results", [])[:3]:
+            items.append(
+                {
+                    "title": item.get("title"),
+                    "url": item.get("url"),
+                    "content": str(item.get("content") or "")[:180],
+                }
+            )
+        prices.append({"query": result.get("query"), "results": items})
+    return prices
+
+
+def _compact_weather(data: Any) -> list[dict[str, Any]]:
+    if not isinstance(data, dict):
+        return []
+    return [
+        {
+            "city": live.get("city"),
+            "weather": live.get("weather"),
+            "temperature": live.get("temperature"),
+            "winddirection": live.get("winddirection"),
+            "windpower": live.get("windpower"),
+        }
+        for live in data.get("lives", [])[:2]
     ]
 
-    return TripPlanResponse(
-        trip_id=f"demo-{slug}-{request.days}",
-        destination=request.destination,
-        summary=(
-            f"这是一份为{request.destination}定制的{request.days}天中文行程草案"
-            f"{month_phrase}{origin_phrase}。整体节奏围绕“{style_theme}”展开，"
-            f"每天安排相对紧凑但保留调整空间{notes_phrase}。"
-        ),
-        days=days,
-        tips=[
-            "优先把相邻景点安排在同一天，减少往返交通消耗。",
-            "每天保留一段可调整时间，用来应对天气、休息或临时发现的好去处。",
-            _budget_tip(request.budget),
-        ],
-        disclaimer="这是一份由本地演示规划器生成的行程草案，建议出发前再核对开放时间、交通和预约信息。",
-    )
 
-
-def _build_day_plan(
-    *,
-    day: int,
-    destination: str,
-    style_theme: str,
-    anchor_place: str,
-) -> TripDay:
-    if day == 1:
-        return TripDay(
-            day=day,
-            title="抵达与初识城市",
-            theme="轻松适应",
-            morning=f"抵达{destination}后先办理入住或寄存行李，留出时间熟悉周边环境。",
-            afternoon=f"选择一处附近的{anchor_place}慢慢逛，建立对城市节奏的第一印象。",
-            evening="晚餐安排在住处附近，避免第一天跨城奔波。",
-            notes=["第一天不建议排得太满。", style_theme],
-        )
-
-    return TripDay(
-        day=day,
-        title=f"第 {day} 天街区路线",
-        theme=style_theme,
-        morning=f"从{destination}交通方便的区域开始，安排一个重点参观或体验项目。",
-        afternoon=f"顺路前往附近的{anchor_place}，中途预留咖啡、休息或临时调整时间。",
-        evening="晚餐尽量选择当天最后一站附近，减少夜间重复换乘。",
-        notes=["每天控制在两次以内的大跨度交通移动，体验会更从容。"],
-    )
-
-
-def _budget_tip(budget: str) -> str:
-    if budget == "low":
-        return "预算偏经济时，可多选择公共交通、简餐和免费观景点，把费用留给真正想体验的项目。"
-    if budget == "high":
-        return "预算较充足时，建议把高价值消费集中在一顿特色餐或一次私享导览上。"
-    return "预算均衡时，可用日常餐饮搭配一两项重点体验，让花费和体验更平衡。"
+def _compact_routes(routes: Any) -> list[dict[str, Any]]:
+    compacted = []
+    for route in routes or []:
+        paths = (route.get("route") or {}).get("paths") or []
+        if paths:
+            compacted.append({"distance": paths[0].get("distance"), "duration": paths[0].get("duration")})
+    return compacted[:2]
 
 
 def _slugify(value: str) -> str:
-    normalized = value.strip().lower()
-    slug = re.sub(r"[^\w]+", "-", normalized, flags=re.UNICODE).strip("-")
+    slug = re.sub(r"[^\w]+", "-", value.strip().lower(), flags=re.UNICODE).strip("-")
     return slug or "trip"
 
 

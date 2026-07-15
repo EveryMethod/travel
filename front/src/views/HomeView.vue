@@ -1,16 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowRight, CalendarDays, CheckCircle2, Compass, MapPinned, Route, Sparkles } from 'lucide-vue-next'
 
-import { getAuthTokens, logout, planTrip } from '@/services'
-import type { BudgetLevel, TravelStyle, TripPlanResponse } from '@/types'
-
-const budgetOptions: Array<{ label: string; value: BudgetLevel }> = [
-  { label: '经济', value: 'low' },
-  { label: '均衡', value: 'medium' },
-  { label: '舒适', value: 'high' },
-]
+import { getAuthTokens, logout, planTripStream } from '@/services'
+import type { TravelStyle, TripPlanResponse } from '@/types'
 
 const styleOptions: Array<{ label: string; value: TravelStyle }> = [
   { label: '人文历史', value: 'culture' },
@@ -30,30 +24,62 @@ const destinations = [
 ]
 
 const features = [
-  { icon: Compass, title: '偏好成形', description: '预算、月份、旅行风格和补充偏好先收束成一条路线。' },
-  { icon: CalendarDays, title: '按天展开', description: '每天拆成上午、下午、晚上，避免只得到景点清单。' },
+  { icon: Compass, title: '偏好成形', description: '预算、日期、旅行风格和补充偏好先收束成一条路线。' },
+  { icon: CalendarDays, title: '按日展开', description: '每天按具体时间点展开，避免只得到景点清单。' },
   { icon: Route, title: '动线清楚', description: '围绕相邻区域安排重点，减少无意义往返。' },
   { icon: CheckCircle2, title: '提醒完整', description: '保留交通、预约、天气和开放时间的核对意识。' },
 ]
 
 const form = reactive({
-  destination: '京都',
+  destination: '北京',
   origin: '上海',
-  days: 3,
-  budget: 'medium' as BudgetLevel,
-  travel_style: 'culture' as TravelStyle,
-  month: '10月',
+  days: 1,
+  budget: '5000',
+  travel_style: ['culture'] as TravelStyle[],
+  start_date: todayIso(),
+  end_date: todayIso(),
   notes: '喜欢慢节奏的早晨和本地美食。',
 })
 
 const plan = ref<TripPlanResponse | null>(null)
 const error = ref('')
 const isLoading = ref(false)
+const streamMessage = ref('')
+const streamSteps = ref<string[]>([])
+const dateWarning = ref('')
 const isLoggedIn = ref(false)
 const router = useRouter()
 
-const canSubmit = computed(() => form.destination.trim().length > 0 && form.days >= 1 && !isLoading.value)
+const maxEndDate = computed(() => addDays(form.start_date, 9))
+const canSubmit = computed(() => form.destination.trim().length > 0 && form.days >= 1 && form.days <= 10 && form.travel_style.length > 0 && !isLoading.value)
 const destinationHasError = computed(() => error.value.length > 0 && form.destination.trim().length === 0)
+const selectedStyleLabels = computed(() => styleOptions.filter((option) => form.travel_style.includes(option.value)).map((option) => option.label).join('、'))
+
+watch(
+  () => [form.start_date, form.end_date],
+  () => {
+    const selectedDays = getTripDays(form.start_date, form.end_date)
+    form.days = selectedDays
+    if (selectedDays > 10) {
+      dateWarning.value = '最多只能选择 10 天行程。'
+      form.end_date = maxEndDate.value
+      return
+    }
+    dateWarning.value = ''
+  },
+)
+
+watch(
+  () => form.days,
+  () => {
+    if (form.days < 1) form.days = 1
+    if (form.days > 10) {
+      form.days = 10
+      dateWarning.value = '最多只能选择 10 天行程。'
+    }
+    form.end_date = addDays(form.start_date, form.days - 1)
+  },
+)
 
 async function createPlan() {
   if (!canSubmit.value) {
@@ -63,22 +89,34 @@ async function createPlan() {
 
   error.value = ''
   isLoading.value = true
+  plan.value = null
+  streamMessage.value = '正在启动路线规划...'
+  streamSteps.value = []
 
   try {
-    plan.value = await planTrip({
+    const payload = {
       destination: form.destination.trim(),
       origin: form.origin.trim(),
-      days: Number(form.days),
+      days: form.days,
       budget: form.budget,
       travel_style: form.travel_style,
-      month: form.month.trim(),
+      start_date: form.start_date,
+      end_date: form.end_date,
       notes: form.notes.trim(),
+    }
+
+    plan.value = await planTripStream(payload, (event) => {
+      if (event.type === 'status' && event.message) {
+        streamMessage.value = event.message
+        streamSteps.value = [...streamSteps.value, event.message]
+      }
     })
   } catch (caughtError) {
     plan.value = null
     error.value = caughtError instanceof Error ? caughtError.message : '规划器暂时无法生成行程。'
   } finally {
     isLoading.value = false
+    streamMessage.value = ''
   }
 }
 
@@ -91,6 +129,38 @@ async function logoutAndReturn() {
 onMounted(() => {
   isLoggedIn.value = getAuthTokens() !== null
 })
+
+function showDateLimitHint() {
+  dateWarning.value = '最多只能选择 10 天行程。'
+}
+
+function toggleTravelStyle(style: TravelStyle) {
+  if (form.travel_style.includes(style)) {
+    if (form.travel_style.length > 1) {
+      form.travel_style = form.travel_style.filter((item) => item !== style)
+    }
+    return
+  }
+  form.travel_style = [...form.travel_style, style]
+}
+
+function getTripDays(start: string, end: string): number {
+  if (!start || !end) return 0
+  const startDate = new Date(`${start}T00:00:00`)
+  const endDate = new Date(`${end}T00:00:00`)
+  return Math.floor((endDate.getTime() - startDate.getTime()) / 86400000) + 1
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function addDays(value: string, days: number): string {
+  if (!value) return ''
+  const date = new Date(`${value}T00:00:00`)
+  date.setDate(date.getDate() + days)
+  return date.toISOString().slice(0, 10)
+}
 </script>
 
 <template>
@@ -138,7 +208,7 @@ onMounted(() => {
       <div class="mx-auto grid max-w-7xl gap-10 px-4 py-16 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:px-8 lg:py-24">
         <div class="self-center">
           <p class="mb-5 inline-flex rounded-md bg-white/10 px-3 py-1 text-xs font-semibold text-[#d6b6f6]">
-            AI travel workspace
+            智能旅行工作台
           </p>
           <h1 class="max-w-3xl text-5xl font-semibold leading-tight sm:text-6xl lg:text-7xl">
             把旅行想法整理成可执行的日程。
@@ -164,13 +234,13 @@ onMounted(() => {
               <span class="h-3 w-3 rounded-full bg-[#f5d75e]" />
               <span class="h-3 w-3 rounded-full bg-[#1aae39]" />
             </div>
-            <p class="text-xs font-semibold text-[#787671]">Route workspace</p>
+            <p class="text-xs font-semibold text-[#787671]">路线工作台</p>
           </div>
 
           <div class="grid gap-4 p-4 sm:grid-cols-[0.8fr_1.2fr]">
             <aside class="rounded-lg bg-[#f6f5f4] p-4">
-              <p class="text-xs font-semibold text-[#787671]">Trip brief</p>
-              <h2 class="mt-2 text-2xl font-semibold">京都，10月</h2>
+              <p class="text-xs font-semibold text-[#787671]">出行摘要</p>
+              <h2 class="mt-2 text-2xl font-semibold">北京，10月</h2>
               <div class="mt-5 space-y-2 text-sm">
                 <p class="rounded-md bg-[#e6e0f5] px-3 py-2 text-[#391c57]">人文历史</p>
                 <p class="rounded-md bg-[#ffe8d4] px-3 py-2 text-[#793400]">本地美食</p>
@@ -182,7 +252,7 @@ onMounted(() => {
               <div class="rounded-lg border border-[#e5e3df] p-4">
                 <div class="mb-3 flex items-center justify-between">
                   <p class="font-semibold">第 1 天 · 轻松适应</p>
-                  <span class="rounded bg-[#fef7d6] px-2 py-1 text-xs font-semibold">上午 / 下午 / 晚上</span>
+                  <span class="rounded bg-[#fef7d6] px-2 py-1 text-xs font-semibold">具体时间点</span>
                 </div>
                 <div class="space-y-2 text-sm text-[#5d5b54]">
                   <p class="rounded-md bg-[#fafaf9] px-3 py-2">办理入住，熟悉周边环境</p>
@@ -209,7 +279,7 @@ onMounted(() => {
     <section id="destinations" class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
       <div class="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
-          <p class="text-xs font-semibold uppercase text-[#5645d4]">Destinations</p>
+          <p class="text-xs font-semibold uppercase text-[#5645d4]">目的地灵感</p>
           <h2 class="mt-3 text-4xl font-semibold leading-tight">先选旅程的质地。</h2>
         </div>
         <p class="max-w-xl text-base leading-7 text-[#5d5b54]">
@@ -229,102 +299,210 @@ onMounted(() => {
     <section id="planner" class="bg-[#f6f5f4] px-4 py-16 sm:px-6 lg:px-8">
       <div class="mx-auto max-w-7xl">
         <div class="mb-8 max-w-3xl">
-          <p class="text-xs font-semibold uppercase text-[#5645d4]">Planner</p>
+          <p class="text-xs font-semibold uppercase text-[#5645d4]">行程规划</p>
           <h2 class="mt-3 text-4xl font-semibold leading-tight">把想法交给一张清楚的行程单。</h2>
           <p id="planner-helper" class="mt-4 text-base leading-7 text-[#5d5b54]">
             保留原来的生成能力，只把表单和结果区改成更像工作台的双栏布局。
           </p>
         </div>
 
-        <div class="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
-          <form class="rounded-xl border border-[#e5e3df] bg-white p-5 sm:p-6 lg:sticky lg:top-24 lg:self-start" :aria-describedby="error ? 'planner-error' : 'planner-helper'" @submit.prevent="createPlan">
-            <div class="mb-6 flex items-center justify-between gap-4">
+        <div class="grid items-stretch gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
+          <form class="rounded-xl border border-[#e5e3df] bg-white p-4 lg:sticky lg:top-24 lg:self-start" :aria-describedby="error ? 'planner-error' : 'planner-helper'" @submit.prevent="createPlan">
+            <div class="mb-4 flex items-center justify-between gap-4">
               <div>
-                <p class="text-xs font-semibold text-[#787671]">Route brief</p>
-                <h3 class="mt-1 text-2xl font-semibold">这次出发</h3>
+                <p class="text-xs font-semibold text-[#787671]">出行摘要</p>
+                <h3 class="mt-1 text-xl font-semibold">这次出发</h3>
               </div>
               <Sparkles class="h-6 w-6 text-[#5645d4]" aria-hidden="true" />
             </div>
 
-            <div class="space-y-4">
+            <div class="space-y-3">
               <label class="block">
                 <span class="text-sm font-medium">目的地</span>
                 <input
                   v-model="form.destination"
                   :aria-invalid="destinationHasError ? 'true' : undefined"
                   :aria-describedby="error ? 'planner-error' : undefined"
-                  class="mt-2 h-11 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]"
+                  class="mt-1.5 h-10 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]"
                   placeholder="京都"
                 />
               </label>
 
-              <div class="grid gap-4 sm:grid-cols-2">
+              <div class="grid gap-3 sm:grid-cols-2">
                 <label class="block">
                   <span class="text-sm font-medium">出发地</span>
-                  <input v-model="form.origin" class="mt-2 h-11 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" placeholder="上海" />
+                  <input v-model="form.origin" class="mt-1.5 h-10 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" placeholder="上海" />
                 </label>
 
-                <label class="block">
+                <div class="block">
                   <span class="text-sm font-medium">旅行天数</span>
-                  <input v-model.number="form.days" min="1" max="14" type="number" class="mt-2 h-11 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" />
-                </label>
+                  <input v-model.number="form.days" type="number" min="1" max="10" class="mt-1.5 h-10 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" />
+                </div>
               </div>
 
-              <div class="grid gap-4 sm:grid-cols-2">
+              <div class="grid gap-3 sm:grid-cols-2">
                 <label class="block">
                   <span class="text-sm font-medium">预算</span>
-                  <select v-model="form.budget" class="mt-2 h-11 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]">
-                    <option v-for="option in budgetOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-                  </select>
+                  <div class="mt-1.5 flex h-10 overflow-hidden rounded-md border border-[#c8c4be] bg-white focus-within:border-[#5645d4] focus-within:ring-2 focus-within:ring-[#d6b6f6]">
+                    <span class="grid w-10 place-items-center border-r border-[#e5e3df] text-sm font-semibold text-[#5d5b54]">¥</span>
+                    <input v-model="form.budget" inputmode="numeric" class="min-w-0 flex-1 px-3 text-base outline-none" placeholder="5000" />
+                  </div>
                 </label>
 
-                <label class="block">
+                <div class="block">
                   <span class="text-sm font-medium">旅行风格</span>
-                  <select v-model="form.travel_style" class="mt-2 h-11 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]">
-                    <option v-for="option in styleOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-                  </select>
-                </label>
+                  <details class="group relative mt-1.5">
+                    <summary class="flex h-10 cursor-pointer list-none items-center justify-between rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none group-open:border-[#5645d4] group-open:ring-2 group-open:ring-[#d6b6f6]">
+                      <span class="truncate">{{ selectedStyleLabels }}</span>
+                      <span class="text-xs text-[#787671]">▾</span>
+                    </summary>
+                    <div class="absolute z-20 mt-1 grid w-full gap-1 rounded-md border border-[#c8c4be] bg-white p-2 shadow-lg">
+                      <label v-for="option in styleOptions" :key="option.value" class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-[#fafaf9]">
+                        <input
+                          type="checkbox"
+                          class="h-4 w-4 accent-[#5645d4]"
+                          :checked="form.travel_style.includes(option.value)"
+                          @change="toggleTravelStyle(option.value)"
+                        />
+                        {{ option.label }}
+                      </label>
+                    </div>
+                  </details>
+                </div>
               </div>
 
-              <label class="block">
-                <span class="text-sm font-medium">出行月份</span>
-                <input v-model="form.month" class="mt-2 h-11 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" placeholder="10月" />
-              </label>
+              <div class="block">
+                <span class="text-sm font-medium">出行日期</span>
+                <div class="mt-1.5 grid gap-2 sm:grid-cols-2">
+                  <input v-model="form.start_date" type="date" class="h-10 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-sm outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" />
+                  <input
+                    v-model="form.end_date"
+                    type="date"
+                    :min="form.start_date"
+                    :max="maxEndDate"
+                    class="h-10 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-sm outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]"
+                    @mouseenter="showDateLimitHint"
+                    @focus="showDateLimitHint"
+                    @click="showDateLimitHint"
+                  />
+                </div>
+                <p class="mt-1.5 text-xs font-medium" :class="dateWarning ? 'text-[#a02e6d]' : 'text-[#787671]'">
+                  {{ dateWarning || `结束日期最多可选到 ${maxEndDate}` }}
+                </p>
+              </div>
 
               <label class="block">
                 <span class="text-sm font-medium">补充偏好</span>
-                <textarea v-model="form.notes" rows="4" class="mt-2 w-full rounded-md border border-[#c8c4be] bg-white px-3 py-2 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" placeholder="美食、节奏、必去地点、同行人情况等..." />
+                <textarea v-model="form.notes" rows="2" class="mt-1.5 w-full rounded-md border border-[#c8c4be] bg-white px-3 py-2 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" placeholder="美食、节奏、必去地点、同行人情况等..." />
               </label>
 
               <p v-if="error" id="planner-error" class="rounded-md border border-[#e03131]/30 bg-[#fde0ec] px-3 py-2 text-sm font-medium text-[#a02e6d]" role="alert">
                 {{ error }}
               </p>
 
-              <button type="submit" :disabled="!canSubmit" class="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-[#5645d4] px-5 py-3 text-sm font-medium text-white hover:bg-[#4534b3] disabled:cursor-not-allowed disabled:bg-[#e5e3df] disabled:text-[#bbb8b1]">
+              <button type="submit" :disabled="!canSubmit" class="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[#5645d4] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#4534b3] disabled:cursor-not-allowed disabled:bg-[#e5e3df] disabled:text-[#bbb8b1]">
                 {{ isLoading ? '正在整理路线...' : '生成路线草案' }}
                 <ArrowRight class="h-4 w-4" aria-hidden="true" />
               </button>
             </div>
           </form>
 
-          <aside class="rounded-xl border border-[#e5e3df] bg-white p-5 sm:p-6 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto" aria-live="polite" :aria-busy="isLoading">
+          <aside class="min-h-0 rounded-xl border border-[#e5e3df] bg-white p-5 sm:p-6 lg:h-full lg:overflow-y-auto" aria-live="polite" :aria-busy="isLoading">
             <div class="mb-5 flex items-center justify-between gap-4">
               <div>
-                <p class="text-xs font-semibold text-[#787671]">Route draft</p>
+                <p class="text-xs font-semibold text-[#787671]">路线草案</p>
                 <h3 class="mt-1 text-2xl font-semibold">路线草案</h3>
               </div>
               <Route class="h-6 w-6 text-[#5645d4]" aria-hidden="true" />
             </div>
 
-            <div v-if="!plan" class="rounded-xl border border-dashed border-[#c8c4be] bg-[#fafaf9] p-6">
+            <div v-if="isLoading" class="overflow-hidden rounded-xl border border-[#d6b6f6] bg-[#fafaf9]">
+              <div class="grid gap-5 p-5 md:grid-cols-[180px_minmax(0,1fr)] sm:p-6">
+                <div class="relative min-h-36 rounded-xl bg-[#0a1530] p-4 text-white">
+                  <div class="absolute right-4 top-4 h-2 w-2 animate-ping rounded-full bg-[#1aae39]" aria-hidden="true" />
+                  <div class="grid h-12 w-12 place-items-center rounded-full bg-white/10">
+                    <div class="h-5 w-5 animate-pulse rounded-full bg-[#f5d75e]" aria-hidden="true" />
+                  </div>
+                  <p class="mt-5 text-xs font-semibold text-[#d6b6f6]">智能规划中</p>
+                  <p class="mt-2 text-xl font-semibold leading-tight">路线正在成形</p>
+                  <div class="mt-5 flex gap-1.5" aria-hidden="true">
+                    <span class="h-1.5 w-8 animate-pulse rounded-full bg-[#ff64c8]" />
+                    <span class="h-1.5 w-5 animate-pulse rounded-full bg-[#f5d75e] [animation-delay:120ms]" />
+                    <span class="h-1.5 w-7 animate-pulse rounded-full bg-[#1aae39] [animation-delay:240ms]" />
+                  </div>
+                </div>
+
+                <div class="min-w-0">
+                  <h4 class="text-2xl font-semibold">正在生成路线草案</h4>
+                  <p class="mt-2 leading-7 text-[#5d5b54]">{{ streamMessage || '正在整理信息...' }}</p>
+
+                  <ol class="mt-5 space-y-3">
+                    <li
+                      v-for="(step, index) in streamSteps"
+                      :key="`${step}-${index}`"
+                      class="grid grid-cols-[24px_minmax(0,1fr)] gap-3"
+                    >
+                      <span
+                        class="mt-0.5 grid h-6 w-6 place-items-center rounded-full text-xs font-semibold"
+                        :class="index === streamSteps.length - 1 ? 'bg-[#5645d4] text-white' : 'bg-[#d9f3e1] text-[#1a1a1a]'"
+                      >
+                        {{ index + 1 }}
+                      </span>
+                      <span
+                        class="rounded-lg border px-3 py-2 text-sm font-medium"
+                        :class="index === streamSteps.length - 1 ? 'border-[#d6b6f6] bg-[#e6e0f5] text-[#391c57]' : 'border-[#e5e3df] bg-white text-[#5d5b54]'"
+                      >
+                        {{ step }}
+                      </span>
+                    </li>
+                    <li v-if="streamSteps.length === 0" class="grid grid-cols-[24px_minmax(0,1fr)] gap-3">
+                      <span class="mt-0.5 h-6 w-6 animate-pulse rounded-full bg-[#5645d4]" />
+                      <span class="rounded-lg border border-[#e5e3df] bg-white px-3 py-2 text-sm font-medium text-[#5d5b54]">
+                        正在连接规划服务...
+                      </span>
+                    </li>
+                  </ol>
+                </div>
+              </div>
+
+              <div class="grid gap-3 border-t border-[#e5e3df] bg-white/70 p-5 sm:p-6 lg:grid-cols-[1.1fr_0.9fr]">
+                <div class="rounded-xl bg-[#f9e79f] p-4">
+                  <div class="h-3 w-20 animate-pulse rounded-full bg-[#523410]/20" />
+                  <div class="mt-4 h-7 w-36 animate-pulse rounded-full bg-[#523410]/25" />
+                  <div class="mt-4 space-y-2">
+                    <div class="h-3 w-full animate-pulse rounded-full bg-[#523410]/15" />
+                    <div class="h-3 w-4/5 animate-pulse rounded-full bg-[#523410]/15" />
+                  </div>
+                </div>
+
+                <div class="grid gap-3">
+                  <div class="rounded-xl border border-[#e5e3df] bg-white p-4">
+                    <div class="flex items-center justify-between gap-4">
+                      <div class="h-4 w-24 animate-pulse rounded-full bg-[#5645d4]/20" />
+                      <div class="h-6 w-16 animate-pulse rounded-md bg-[#e6e0f5]" />
+                    </div>
+                    <div class="mt-4 grid gap-2">
+                      <div class="h-9 animate-pulse rounded-lg bg-[#fafaf9]" />
+                      <div class="h-9 animate-pulse rounded-lg bg-[#fafaf9]" />
+                      <div class="h-9 animate-pulse rounded-lg bg-[#fafaf9]" />
+                    </div>
+                  </div>
+                  <div class="grid gap-3 sm:grid-cols-2">
+                    <div class="h-16 animate-pulse rounded-xl bg-[#dcecfa]" />
+                    <div class="h-16 animate-pulse rounded-xl bg-[#d9f3e1]" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-else-if="!plan" class="rounded-xl border border-dashed border-[#c8c4be] bg-[#fafaf9] p-6">
               <h4 class="text-2xl font-semibold">还没有路线草案。</h4>
               <p class="mt-3 max-w-2xl leading-7 text-[#5d5b54]">
-                填写左侧信息后，这里会出现按天整理的上午、下午、晚上安排，以及出发前提醒。
+                填写左侧信息后，这里会按具体日期生成天气、预算、交通和时间点安排。
               </p>
-              <div class="mt-6 grid gap-3 sm:grid-cols-3">
-                <div class="rounded-lg bg-[#ffe8d4] p-4 text-sm font-medium">上午 · 轻一点开始</div>
-                <div class="rounded-lg bg-[#e6e0f5] p-4 text-sm font-medium">下午 · 安排重点</div>
-                <div class="rounded-lg bg-[#d9f3e1] p-4 text-sm font-medium">晚上 · 留给回味</div>
+              <div class="mt-6 grid gap-3 sm:grid-cols-2">
+                <div class="rounded-lg bg-[#ffe8d4] p-4 text-sm font-medium">日期 · 天气 · 当日预算</div>
+                <div class="rounded-lg bg-[#e6e0f5] p-4 text-sm font-medium">时间点 · 地点 · 费用提示</div>
               </div>
             </div>
 
@@ -337,35 +515,41 @@ onMounted(() => {
                 <p class="text-sm leading-6 text-[#37352f]">{{ plan.summary }}</p>
               </div>
 
-              <div class="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
-                <article v-for="day in plan.days" :key="day.day" class="rounded-xl border border-[#e5e3df] p-4">
-                <div class="flex items-start justify-between gap-3">
-                  <div>
-                    <p class="text-xs font-semibold text-[#5645d4]">第 {{ day.day }} 天</p>
-                    <h3 class="mt-1 text-lg font-semibold leading-snug">{{ day.title }}</h3>
-                  </div>
-                  <span class="shrink-0 rounded-md bg-[#e6e0f5] px-2 py-1 text-xs font-semibold text-[#391c57]">{{ day.theme }}</span>
-                </div>
+              <div class="grid gap-4">
+                <article v-for="day in plan.days" :key="`${day.day}-${day.date}`" class="rounded-xl border border-[#e5e3df] p-4">
+                  <div class="grid gap-3 lg:grid-cols-[180px_minmax(0,1fr)]">
+                    <div>
+                      <p class="text-xs font-semibold text-[#5645d4]">第 {{ day.day }} 天 · {{ day.date }}</p>
+                      <h3 class="mt-1 text-lg font-semibold leading-snug">{{ day.title }}</h3>
+                      <div class="mt-3 grid gap-2 text-xs font-medium text-[#5d5b54]">
+                        <p class="rounded-md bg-[#dcecfa] px-3 py-2">{{ day.weather }}</p>
+                        <p class="rounded-md bg-[#f9e79f] px-3 py-2">{{ day.daily_budget }}</p>
+                        <p class="rounded-md bg-[#d9f3e1] px-3 py-2">{{ day.transport }}</p>
+                      </div>
+                    </div>
 
-                <dl class="mt-4 grid gap-2">
-                  <div class="rounded-lg bg-[#fafaf9] p-3">
-                    <dt class="font-semibold">上午</dt>
-                    <dd class="mt-1 text-sm leading-6 text-[#5d5b54]">{{ day.morning }}</dd>
+                    <ol class="grid gap-3">
+                      <li v-for="item in day.items" :key="`${day.date}-${item.time}-${item.place}`" class="grid gap-3 rounded-lg bg-[#fafaf9] p-3 sm:grid-cols-[72px_minmax(0,1fr)]">
+                        <p class="text-sm font-semibold text-[#5645d4]">{{ item.time }}</p>
+                        <div>
+                          <div class="flex flex-wrap items-center gap-2">
+                            <h4 class="font-semibold">{{ item.place }}</h4>
+                            <span class="rounded bg-white px-2 py-1 text-xs font-semibold text-[#793400]">{{ item.estimated_cost }}</span>
+                          </div>
+                          <p class="mt-2 text-sm leading-6 text-[#37352f]">{{ item.activity }}</p>
+                          <div class="mt-2 grid gap-2 text-xs font-medium text-[#5d5b54] md:grid-cols-2">
+                            <p class="rounded-md bg-white px-2 py-1.5">{{ item.booking_hint }}</p>
+                            <p class="rounded-md bg-white px-2 py-1.5">{{ item.source_hint }}</p>
+                          </div>
+                        </div>
+                      </li>
+                    </ol>
                   </div>
-                  <div class="rounded-lg bg-[#fafaf9] p-3">
-                    <dt class="font-semibold">下午</dt>
-                    <dd class="mt-1 text-sm leading-6 text-[#5d5b54]">{{ day.afternoon }}</dd>
-                  </div>
-                  <div class="rounded-lg bg-[#fafaf9] p-3">
-                    <dt class="font-semibold">晚上</dt>
-                    <dd class="mt-1 text-sm leading-6 text-[#5d5b54]">{{ day.evening }}</dd>
-                  </div>
-                </dl>
 
-                <ul class="mt-3 list-disc space-y-1 pl-5 text-sm leading-6 text-[#5d5b54]">
-                  <li v-for="note in day.notes" :key="note">{{ note }}</li>
-                </ul>
-              </article>
+                  <ul class="mt-3 list-disc space-y-1 pl-5 text-sm leading-6 text-[#5d5b54]">
+                    <li v-for="note in day.notes" :key="note">{{ note }}</li>
+                  </ul>
+                </article>
               </div>
 
               <div class="rounded-xl bg-[#d9f3e1] p-4">
@@ -385,7 +569,7 @@ onMounted(() => {
       <div class="rounded-xl bg-[#f9e79f] p-6 sm:p-8 lg:p-10">
         <div class="grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
           <div>
-            <p class="text-xs font-semibold uppercase text-[#523410]">Method</p>
+            <p class="text-xs font-semibold uppercase text-[#523410]">规划方法</p>
             <h2 class="mt-3 text-4xl font-semibold leading-tight">一份好路线，需要四个层次。</h2>
           </div>
           <div class="grid gap-4 sm:grid-cols-2">

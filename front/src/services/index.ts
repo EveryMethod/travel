@@ -19,6 +19,57 @@ export async function planTrip(payload: TripPlanRequest): Promise<TripPlanRespon
   })
 }
 
+export async function planTripStream(
+  payload: TripPlanRequest,
+  onEvent: (event: { type: string; message?: string; data?: unknown }) => void,
+): Promise<TripPlanResponse> {
+  let response: Response
+
+  try {
+    response = await fetch('/api/trips/plan/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+  } catch {
+    throw new Error('无法连接后端 API，请确认服务正在运行。')
+  }
+
+  if (!response.ok || !response.body) {
+    throw new Error(await getErrorMessage(response))
+  }
+
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
+  let buffer = ''
+  let plan: TripPlanResponse | null = null
+
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+
+    buffer += value
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+
+    for (const line of lines) {
+      if (!line.trim()) continue
+      const event = JSON.parse(line) as { type: string; message?: string; data?: unknown }
+      onEvent(event)
+      if (event.type === 'error') {
+        throw new Error(event.message ?? '规划器暂时无法生成行程。')
+      }
+      if (event.type === 'plan') {
+        plan = event.data as TripPlanResponse
+      }
+    }
+  }
+
+  if (!plan) {
+    throw new Error('规划器暂时没有返回完整行程。')
+  }
+  return plan
+}
+
 export async function register(payload: RegisterRequest, remember: boolean): Promise<AuthResponse> {
   const auth = await request<AuthResponse>('/api/auth/register', {
     method: 'POST',
@@ -70,16 +121,21 @@ export async function refreshAuth(): Promise<AuthResponse> {
 
 export async function logout(): Promise<void> {
   const tokens = getAuthTokens()
-  if (tokens) {
-    await request('/api/auth/logout', {
-      method: 'POST',
-      body: {
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
-      },
-    })
+  try {
+    if (tokens) {
+      await request('/api/auth/logout', {
+        method: 'POST',
+        body: {
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+        },
+      })
+    }
+  } catch {
+    // ponytail: logout is best-effort; local tokens must clear even if backend is down.
+  } finally {
+    clearAuthTokens()
   }
-  clearAuthTokens()
 }
 
 export function getAuthTokens(): AuthTokens | null {
@@ -108,12 +164,14 @@ async function request<T = unknown>(
   options: { method?: string; body?: unknown; headers?: HeadersInit } = {},
 ): Promise<T> {
   let response: Response
+  const tokens = getAuthTokens()
 
   try {
     response = await fetch(url, {
       method: options.method ?? 'GET',
       headers: {
         ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...(tokens ? { Authorization: `Bearer ${tokens.access_token}` } : {}),
         ...options.headers,
       },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),

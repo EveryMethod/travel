@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { completeOAuthLogin } from '@/services'
 import type { OAuthProvider } from '@/types'
@@ -7,11 +7,19 @@ import type { OAuthProvider } from '@/types'
 const route = useRoute()
 const status = ref('正在完成登录...')
 
-const provider = computed<OAuthProvider>(() => (route.query.provider === 'qq' ? 'qq' : 'wechat'))
+function readProvider(): OAuthProvider | null {
+  return route.query.provider === 'qq' || route.query.provider === 'wechat' ? route.query.provider : null
+}
 
 onMounted(async () => {
+  const provider = readProvider()
   const code = typeof route.query.code === 'string' ? route.query.code : ''
   const state = typeof route.query.state === 'string' ? route.query.state : ''
+
+  if (!provider) {
+    notifyError('缺少或非法第三方登录类型。')
+    return
+  }
 
   if (!code || !state) {
     notifyError('缺少登录回调参数。')
@@ -19,7 +27,7 @@ onMounted(async () => {
   }
 
   try {
-    const auth = await completeOAuthLogin(provider.value, code, state, false)
+    const auth = await completeOAuthLogin(provider, code, state, false)
     window.opener?.postMessage({ type: 'travel:oauth-success', auth }, window.location.origin)
     status.value = '登录成功，可以关闭此窗口。'
   } catch (error) {

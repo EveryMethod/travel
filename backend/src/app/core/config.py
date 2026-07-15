@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.openai.com/v1"
     openai_api_key: str = ""
     llm_name: str = "gpt-4o-mini"
+    llm_temperature: float = 0.4
+    llm_timeout_seconds: int = 60
+    mcp_gateway_url: str = "http://127.0.0.1:8100"
+    mcp_timeout_seconds: int = 20
+    amap_api_key: str = ""
+    tavily_api_key: str = ""
+    tavily_search_url: str = "https://api.tavily.com/search"
     auth_access_token_ttl_seconds: int = 60 * 30
     auth_refresh_token_ttl_seconds: int = 60 * 60 * 24 * 30
 
