@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal
 
-from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Index, String
+from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.mysql import BIGINT, JSON, TINYINT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -131,3 +131,30 @@ class OAuthProviderConfig(Base):
     )
 
     __table_args__ = ({"comment": "第三方登录应用配置表"},)
+
+
+class CallTrace(Base):
+    __tablename__ = "call_traces"
+
+    id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True, comment="调用追踪ID")
+    trace_id: Mapped[str] = mapped_column(String(36), nullable=False, comment="请求链路ID")
+    span_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True, comment="当前调用ID")
+    parent_span_id: Mapped[str | None] = mapped_column(String(36), nullable=True, comment="上级调用ID")
+    kind: Mapped[str] = mapped_column(Enum("agent.llm", "mcp.client", "tool.execute"), nullable=False, comment="调用类型")
+    name: Mapped[str] = mapped_column(String(128), nullable=False, comment="模型名或工具名")
+    status: Mapped[str] = mapped_column(Enum("ok", "error"), nullable=False, comment="调用状态")
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="开始时间")
+    ended_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="结束时间")
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, comment="耗时毫秒")
+    input_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="输入摘要")
+    output_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="输出摘要")
+    error_type: Mapped[str | None] = mapped_column(String(128), nullable=True, comment="异常类型")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True, comment="异常信息")
+    metadata_json: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True, comment="补充元数据")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp(), comment="创建时间")
+
+    __table_args__ = (
+        Index("idx_call_traces_trace_id", "trace_id"),
+        Index("idx_call_traces_kind_started_at", "kind", "started_at"),
+        {"comment": "智能体、MCP和工具调用追踪表"},
+    )

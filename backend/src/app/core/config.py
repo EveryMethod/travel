@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 60
     mcp_gateway_url: str = "http://127.0.0.1:8100"
     mcp_timeout_seconds: int = 20
+    trace_enabled: bool = True
+    trace_query_enabled: bool | None = None
+    trace_retention_days: int = 30
+    trace_summary_max_chars: int = 120
     amap_api_key: str = ""
     tavily_api_key: str = ""
     tavily_search_url: str = "https://api.tavily.com/search"
@@ -49,6 +53,15 @@ class Settings(BaseSettings):
             database=self.mysql_database,
             query={"charset": "utf8mb4"},
         ).render_as_string(hide_password=False)
+
+    @computed_field
+    @property
+    def effective_trace_query_enabled(self) -> bool:
+        """Enable trace query API by default only in development."""
+
+        if self.trace_query_enabled is not None:
+            return self.trace_query_enabled
+        return self.app_env == "development"
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_DIR / ".env",
