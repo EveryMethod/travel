@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import time
 from collections.abc import Callable, Iterator
@@ -11,7 +12,7 @@ from itertools import islice
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, TypeVar
 from uuid import uuid4
 
@@ -56,7 +57,7 @@ class CallTraceRecord:
 
 @contextmanager
 def trace_context(trace_id: str | None = None) -> Iterator[str]:
-    active_trace_id = trace_id or str(uuid4())
+    active_trace_id = _trace_id_for_storage(trace_id)
     trace_token = _trace_id.set(active_trace_id)
     span_token = _span_id.set(None)
     try:
@@ -70,8 +71,16 @@ def current_trace_id() -> str | None:
     return _trace_id.get()
 
 
+def _trace_id_for_storage(trace_id: str | None = None) -> str:
+    value = (trace_id or str(uuid4())).strip()
+    return value[:36] or str(uuid4())
+
+
 def trace_call(kind: str, name: str, input_data: Any, metadata: dict[str, Any] | None, func: Callable[[], T]) -> T:
     if not settings.trace_enabled:
+        return func()
+
+    if kind not in {"agent.llm", "mcp.client", "tool.execute"}:
         return func()
 
     trace_token: Token[str | None] | None = None
@@ -80,10 +89,13 @@ def trace_call(kind: str, name: str, input_data: Any, metadata: dict[str, Any] |
         trace_id = str(uuid4())
         trace_token = _trace_id.set(trace_id)
 
+    name = name[:128]
+    input_summary = summarize_value(input_data)
+    metadata_summary = summarize_value(metadata or {})
     parent_span_id = _span_id.get()
     span_id = str(uuid4())
     span_token = _span_id.set(span_id)
-    started_at = datetime.utcnow()
+    started_at = datetime.now(UTC).replace(tzinfo=None)
     started_perf = time.perf_counter()
     status = "ok"
     output_summary: Any = None
@@ -101,7 +113,7 @@ def trace_call(kind: str, name: str, input_data: Any, metadata: dict[str, Any] |
         raise
     finally:
         try:
-            ended_at = datetime.utcnow()
+            ended_at = datetime.now(UTC).replace(tzinfo=None)
             record = CallTraceRecord(
                 trace_id=trace_id,
                 span_id=span_id,
@@ -112,11 +124,11 @@ def trace_call(kind: str, name: str, input_data: Any, metadata: dict[str, Any] |
                 started_at=started_at,
                 ended_at=ended_at,
                 duration_ms=int((time.perf_counter() - started_perf) * 1000),
-                input_summary=summarize_value(input_data),
+                input_summary=input_summary,
                 output_summary=output_summary,
                 error_type=error_type,
                 error_message=error_message,
-                metadata=summarize_value(metadata or {}),
+                metadata=metadata_summary,
             )
             _safe_write_record(record)
         finally:
@@ -145,7 +157,9 @@ def _summarize(value: Any, limit: int) -> Any:
     if isinstance(value, str):
         redacted = _redact_text(value, limit)
         return redacted if len(value) <= limit else {"type": "str", "length": len(value), "prefix": redacted}
-    if isinstance(value, (int, float, bool)) or value is None:
+    if isinstance(value, float):
+        return value if math.isfinite(value) else {"type": "float", "value": str(value)}
+    if isinstance(value, (int, bool)) or value is None:
         return value
     return {"type": value.__class__.__name__}
 
@@ -171,7 +185,7 @@ def _is_sensitive_key(key: str) -> bool:
 
 def _redact_text(text: str, limit: int) -> str:
     redacted = re.sub(
-        r"(?i)\b(authorization\s*[:=]\s*)(bearer\s+)?[^\s,;]+",
+        r"(?i)([\"']?authorization[\"']?\s*[:=]\s*)(bearer\s+)?(\"[^\"]*\"|'[^']*'|[^\s,;}]+)",
         lambda match: f"{match.group(1)}{match.group(2) or ''}{_REDACTED}",
         text,
     )
@@ -281,7 +295,7 @@ def demo() -> None:
             "implicit",
             {},
             None,
-            lambda: trace_call("inner", "implicit", {}, None, lambda: current_trace_id()),
+            lambda: trace_call("tool.execute", "implicit", {}, None, lambda: current_trace_id()),
         )
         assert records[0].trace_id == records[1].trace_id
         assert records[0].parent_span_id == records[1].span_id
@@ -289,9 +303,9 @@ def demo() -> None:
 
         logger.disabled = True
         _write_record = lambda record: (_ for _ in ()).throw(RuntimeError("secret=leak"))
-        assert trace_call("safe", "write", {}, None, lambda: "ok") == "ok"
+        assert trace_call("tool.execute", "write", {}, None, lambda: "ok") == "ok"
         try:
-            trace_call("safe", "error", {}, None, lambda: (_ for _ in ()).throw(ValueError("original")))
+            trace_call("tool.execute", "error", {}, None, lambda: (_ for _ in ()).throw(ValueError("original")))
         except ValueError as exc:
             assert str(exc) == "original"
         assert current_trace_id() is None
@@ -307,8 +321,16 @@ def demo() -> None:
         assert capped["19"] == 19
         assert capped["__truncated__"] == {"type": "dict", "length": 21, "remaining": 1}
         assert summarize_value("abcd", max_chars=0)["prefix"] == ""
-        assert "hunter2" not in _redact_text('{"api_key":"hunter2", "password": "hunter2"}', 500)
+        assert "hunter2" not in _redact_text('{"api_key":"hunter2", "password": "hunter2", "Authorization":"Bearer hunter2"}', 500)
         assert summarize_value({"abcdef": 1, "abcxyz": 2}, max_chars=3) == {"abc": 1, "abc#1": 2}
+        assert summarize_value(float("nan")) == {"type": "float", "value": "nan"}
+        assert len(_trace_id_for_storage("x" * 100)) == 36
+
+        _write_record = fake_write
+        mutable_input = {"city": "杭州"}
+        trace_call("mcp.client", "x" * 200, mutable_input, None, lambda: mutable_input.update({"city": "上海"}))
+        assert records[-1].name == "x" * 128
+        assert records[-1].input_summary == {"city": "杭州"}
 
         _write_record = fake_write
         try:
