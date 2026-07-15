@@ -152,13 +152,14 @@ def _summarize(value: Any, limit: int) -> Any:
 
 def _summarize_dict(value: dict[Any, Any], limit: int) -> dict[str, Any]:
     items: dict[str, Any] = {}
-    for index, (key, item) in enumerate(islice(value.items(), 3)):
+    max_items = 20
+    for key, item in islice(value.items(), max_items):
         key_text = str(key)
-        if _is_sensitive_key(key_text):
-            items[f"***REDACTED_KEY_{index}***"] = _REDACTED
-        else:
-            items[_redact_text(key_text, limit)] = _summarize(item, limit)
-    return {"type": "dict", "length": len(value), "items": items}
+        safe_key = _redact_text(key_text, limit) if _redact_text(key_text, limit) != key_text else key_text
+        items[safe_key] = _REDACTED if _is_sensitive_key(key_text) else _summarize(item, limit)
+    if len(value) > max_items:
+        items["__truncated__"] = {"type": "dict", "length": len(value), "remaining": len(value) - max_items}
+    return items
 
 
 def _is_sensitive_key(key: str) -> bool:
@@ -173,7 +174,7 @@ def _redact_text(text: str, limit: int) -> str:
         text,
     )
     redacted = re.sub(
-        r"(?i)\b((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|key)\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;]+)",
+        r"(?i)([\"']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|key)[\"']?\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;}]+)",
         lambda match: f"{match.group(1)}{_REDACTED}",
         redacted,
     )
@@ -253,7 +254,7 @@ def demo() -> None:
             assert trace_id == "trace-demo"
             assert current_trace_id() == "trace-demo"
             redacted = summarize_value({"api_key": "secret", "city": "杭州"})
-            assert redacted["items"] == {"***REDACTED_KEY_0***": _REDACTED, "city": "杭州"}
+            assert redacted == {"api_key": _REDACTED, "city": "杭州"}
             assert trace_call("mcp.client", "demo_tool", {"city": "杭州"}, None, lambda: {"ok": True}) == {"ok": True}
             try:
                 trace_call(
@@ -274,7 +275,7 @@ def demo() -> None:
 
         records.clear()
         trace_call(
-            "outer",
+            "mcp.client",
             "implicit",
             {},
             None,
@@ -300,9 +301,9 @@ def demo() -> None:
         object_summary = summarize_value(SecretRepr())
         assert "repr" not in object_summary
         assert "hunter2" not in json.dumps(object_summary)
-        capped = summarize_value({"a": 1, "b": 2, "c": 3, "d": 4})
-        assert capped["length"] == 4
-        assert list(capped["items"]) == ["a", "b", "c"]
+        capped = summarize_value({str(index): index for index in range(21)})
+        assert capped["19"] == 19
+        assert capped["__truncated__"] == {"type": "dict", "length": 21, "remaining": 1}
         assert summarize_value("abcd", max_chars=0)["prefix"] == ""
     finally:
         logger.disabled = old_logger_disabled
