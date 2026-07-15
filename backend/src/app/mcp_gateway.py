@@ -6,6 +6,7 @@ import httpx
 from fastapi import FastAPI, HTTPException
 
 from src.app.core.config import settings
+from src.app.core.tracing import trace_call
 
 app = FastAPI(title="Travel MCP Gateway")
 
@@ -28,9 +29,21 @@ def call_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Unknown MCP tool.")
 
     try:
-        return tool(arguments)
+        return trace_call(
+            "tool.execute",
+            tool_name,
+            arguments,
+            {"gateway": "travel-mcp", "source": _tool_source(tool_name)},
+            lambda: tool(arguments),
+        )
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="AMap request failed.") from exc
+
+
+def _tool_source(tool_name: str) -> str:
+    if tool_name == "ticket_price_search":
+        return "tavily"
+    return "amap"
 
 
 def _amap_get(path: str, params: dict[str, Any]) -> dict[str, Any]:
