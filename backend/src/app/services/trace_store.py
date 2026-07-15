@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import select
@@ -62,28 +63,24 @@ def _serialize_trace(row: CallTrace) -> dict[str, Any]:
 
 
 def demo() -> None:
-    row = type(
-        "Row",
-        (),
-        {
-            "id": 1,
-            "trace_id": "trace-demo",
-            "span_id": "span-demo",
-            "parent_span_id": None,
-            "kind": "mcp.client",
-            "name": "amap_weather",
-            "status": "ok",
-            "started_at": None,
-            "ended_at": None,
-            "duration_ms": 1,
-            "input_summary": {"city": "杭州"},
-            "output_summary": {"keys": ["lives"]},
-            "error_type": None,
-            "error_message": None,
-            "metadata_json": {"a": 1},
-            "created_at": None,
-        },
-    )()
+    row = SimpleNamespace(
+        id=1,
+        trace_id="trace-demo",
+        span_id="span-demo",
+        parent_span_id=None,
+        kind="mcp.client",
+        name="amap_weather",
+        status="ok",
+        started_at=None,
+        ended_at=None,
+        duration_ms=1,
+        input_summary={"city": "杭州"},
+        output_summary={"keys": ["lives"]},
+        error_type=None,
+        error_message=None,
+        metadata_json={"a": 1},
+        created_at=None,
+    )
     assert _serialize_trace(row)["metadata"] == {"a": 1}
     assert _serialize_trace(row)["name"] == "amap_weather"
 

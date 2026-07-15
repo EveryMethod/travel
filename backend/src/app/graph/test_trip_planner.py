@@ -7,14 +7,7 @@ from src.app.models.trip import TripPlanRequest
 
 def demo() -> None:
     def fake_call_tool(name, arguments):
-        def run():
-            if name == "ticket_price_search":
-                return {"query": arguments["query"], "results": [{"title": "西湖门票免费", "url": "https://example.com", "content": "西湖景区免费开放，游船另付费。"}]}
-            if name == "amap_geocode":
-                return {"geocodes": [{"location": "120.0,30.0"}]}
-            return {"pois": [{"name": "西湖", "type": "风景名胜", "address": "杭州", "location": "120.0,30.0"}]}
-
-        return tracing.trace_call("mcp.client", name, arguments, None, run)
+        return tracing.trace_call("mcp.client", name, arguments, None, lambda: _fake_tool_result(name, arguments))
 
     def fake_generate_json(messages):
         return tracing.trace_call("agent.llm", "demo-llm", {"message_count": len(messages)}, None, lambda: {
@@ -94,6 +87,14 @@ def demo() -> None:
     assert "agent.llm" in kinds
     assert "mcp.client" in kinds
     assert {record.trace_id for record in records} == {"trace-trip-demo"}
+
+
+def _fake_tool_result(name, arguments):
+    if name == "ticket_price_search":
+        return {"query": arguments["query"], "results": [{"title": "西湖门票免费", "url": "https://example.com", "content": "西湖景区免费开放，游船另付费。"}]}
+    if name == "amap_geocode":
+        return {"geocodes": [{"location": "120.0,30.0"}]}
+    return {"pois": [{"name": "西湖", "type": "风景名胜", "address": "杭州", "location": "120.0,30.0"}]}
 
 
 if __name__ == "__main__":

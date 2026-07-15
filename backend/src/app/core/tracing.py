@@ -16,17 +16,7 @@ from datetime import UTC, datetime
 from typing import Any, TypeVar
 from uuid import uuid4
 
-try:
-    from src.app.core.config import settings
-except ModuleNotFoundError:
-    if __name__ != "__main__":
-        raise
-
-    class _DemoSettings:
-        trace_enabled = True
-        trace_summary_max_chars = 120
-
-    settings = _DemoSettings()
+from src.app.core.config import settings
 
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
@@ -130,7 +120,10 @@ def trace_call(kind: str, name: str, input_data: Any, metadata: dict[str, Any] |
                 error_message=error_message,
                 metadata=metadata_summary,
             )
-            _safe_write_record(record)
+            try:
+                _write_record(record)
+            except Exception as exc:
+                _warn_trace_error("trace_write_error", record, exc)
         finally:
             _span_id.reset(span_token)
             if trace_token is not None:
@@ -150,10 +143,8 @@ def summarize_value(value: Any, max_chars: int | None = None) -> Any:
 def _summarize(value: Any, limit: int) -> Any:
     if isinstance(value, dict):
         return _summarize_dict(value, limit)
-    if isinstance(value, list):
-        return {"type": "list", "length": len(value), "items": [_summarize(item, limit) for item in value[:3]]}
-    if isinstance(value, tuple):
-        return {"type": "tuple", "length": len(value), "items": [_summarize(item, limit) for item in value[:3]]}
+    if isinstance(value, (list, tuple)):
+        return {"type": type(value).__name__, "length": len(value), "items": [_summarize(item, limit) for item in value[:3]]}
     if isinstance(value, str):
         prefix = value[:limit]
         redacted = _redact_text(prefix, limit)
@@ -204,25 +195,22 @@ def _redact_text(text: str, limit: int) -> str:
     return redacted[:limit]
 
 
-def _safe_write_record(record: CallTraceRecord) -> None:
+def _warn_trace_error(event: str, record: CallTraceRecord, exc: Exception) -> None:
     try:
-        _write_record(record)
-    except Exception as exc:
-        try:
-            logger.warning(
-                json.dumps(
-                    {
-                        "event": "trace_write_error",
-                        "trace_id": record.trace_id,
-                        "span_id": record.span_id,
-                        "error_type": exc.__class__.__name__,
-                        "error_message": _redact_text(str(exc), 500),
-                    },
-                    ensure_ascii=False,
-                )
+        logger.warning(
+            json.dumps(
+                {
+                    "event": event,
+                    "trace_id": record.trace_id,
+                    "span_id": record.span_id,
+                    "error_type": exc.__class__.__name__,
+                    "error_message": _redact_text(str(exc), 500),
+                },
+                ensure_ascii=False,
             )
-        except Exception:
-            pass
+        )
+    except Exception:
+        pass
 
 
 def _write_record(record: CallTraceRecord) -> None:
@@ -243,18 +231,7 @@ def _write_record(record: CallTraceRecord) -> None:
 
         write_trace(record)
     except Exception as exc:
-        logger.warning(
-            json.dumps(
-                {
-                    "event": "trace_store_error",
-                    "trace_id": record.trace_id,
-                    "span_id": record.span_id,
-                    "error_type": exc.__class__.__name__,
-                    "error_message": _redact_text(str(exc), 500),
-                },
-                ensure_ascii=False,
-            )
-        )
+        _warn_trace_error("trace_store_error", record, exc)
 
 
 def demo() -> None:
