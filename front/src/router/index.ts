@@ -21,6 +21,20 @@ const routes: RouteRecordRaw[] = [
     name: 'auth-callback',
     component: () => import('@/views/AuthCallbackView.vue'),
   },
+  {
+    path: '/workspace',
+    name: 'workspace',
+    component: () => import('@/views/WorkspaceView.vue'),
+  },
+  {
+    path: '/trips/:id',
+    name: 'trip-detail',
+    component: () => import('@/views/TripDetailView.vue'),
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    redirect: '/login',
+  },
 ]
 
 const router = createRouter({
@@ -30,8 +44,9 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   const isLoggedIn = getAuthTokens() !== null
+  const protectedRoutes = new Set(['home', 'workspace', 'trip-detail'])
 
-  if (to.name === 'home' && !isLoggedIn) {
+  if (typeof to.name === 'string' && protectedRoutes.has(to.name) && !isLoggedIn) {
     return { name: 'login' }
   }
 

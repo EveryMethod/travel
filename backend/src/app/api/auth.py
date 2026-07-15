@@ -1,6 +1,7 @@
 """Authentication routes."""
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis import Redis
 from sqlalchemy.orm import Session
 
@@ -15,7 +16,9 @@ from src.app.models.auth import (
     RefreshRequest,
     RegisterRequest,
 )
+from src.app.models.db import User
 from src.app.services.auth_service import (
+    get_user_by_access_token,
     login_with_oauth_account,
     login_with_password,
     logout,
@@ -29,6 +32,20 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 def get_redis() -> Redis:
     return redis_client
+
+
+auth_scheme = HTTPBearer(auto_error=False)
+
+
+def require_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(auth_scheme),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> User:
+    if not credentials or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录状态已失效，请重新登录。")
+
+    return get_user_by_access_token(db=db, redis=redis, access_token=credentials.credentials)
 
 
 @router.post("/register", response_model=AuthResponse)

@@ -12,6 +12,7 @@ from src.app.core.database import Base
 
 UserStatus = Literal["active", "disabled"]
 OAuthProviderName = Literal["qq", "wechat"]
+TripStatus = Literal["completed"]
 
 
 class User(Base):
@@ -34,6 +35,7 @@ class User(Base):
     password_credential: Mapped["UserPasswordCredential | None"] = relationship(back_populates="user")
     oauth_accounts: Mapped[list["UserOAuthAccount"]] = relationship(back_populates="user")
     sessions: Mapped[list["AuthSession"]] = relationship(back_populates="user")
+    trips: Mapped[list["Trip"]] = relationship(back_populates="user")
 
     __table_args__ = (Index("idx_users_status", "status"), {"comment": "用户主表"})
 
@@ -157,4 +159,33 @@ class CallTrace(Base):
         Index("idx_call_traces_trace_id", "trace_id"),
         Index("idx_call_traces_kind_started_at", "kind", "started_at"),
         {"comment": "智能体、MCP和工具调用追踪表"},
+    )
+
+
+class Trip(Base):
+    __tablename__ = "trips"
+
+    id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True, comment="行程ID")
+    user_id: Mapped[int] = mapped_column(BIGINT(unsigned=True), ForeignKey("users.id"), nullable=False, comment="关联用户ID")
+    trace_id: Mapped[str | None] = mapped_column(String(36), nullable=True, comment="生成链路ID")
+    destination: Mapped[str] = mapped_column(String(120), nullable=False, comment="目的地")
+    days: Mapped[int] = mapped_column(Integer, nullable=False, comment="行程天数")
+    status: Mapped[TripStatus] = mapped_column(Enum("completed"), default="completed", server_default="completed", nullable=False, comment="行程状态")
+    request_json: Mapped[dict] = mapped_column(JSON, nullable=False, comment="原始规划请求")
+    plan_json: Mapped[dict] = mapped_column(JSON, nullable=False, comment="生成行程结果")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp(), comment="创建时间")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.current_timestamp(),
+        server_onupdate=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
+        comment="更新时间",
+    )
+
+    user: Mapped[User] = relationship(back_populates="trips")
+
+    __table_args__ = (
+        Index("idx_trips_user_created_at", "user_id", "created_at"),
+        Index("idx_trips_trace_id", "trace_id"),
+        {"comment": "用户保存的旅行行程表"},
     )

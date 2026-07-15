@@ -47,6 +47,29 @@ export interface TripPlanResponse {
   disclaimer: string
 }
 
+export interface SavedTripListItem {
+  id: number
+  destination: string
+  days: number
+  status: 'completed'
+  created_at: string
+}
+
+export interface SavedTripDetail extends SavedTripListItem {
+  trace_id: string | null
+  request_json: TripPlanRequest
+  plan_json: TripPlanResponse
+  updated_at: string
+}
+
+export type TripStreamEvent =
+  | { type: 'trace'; trace_id: string }
+  | { type: 'status'; message: string }
+  | { type: 'context'; data: unknown }
+  | { type: 'plan'; data: TripPlanResponse }
+  | { type: 'done' }
+  | { type: 'error'; message: string }
+
 export type OAuthProvider = 'qq' | 'wechat'
 
 export interface AuthUser {

@@ -135,6 +135,26 @@ def logout(*, db: Session, redis: Redis, access_token: str | None, refresh_token
     return {"status": "ok"}
 
 
+def get_user_by_access_token(*, db: Session, redis: Redis, access_token: str) -> User:
+    session_id = redis.get(_access_key(access_token))
+    if not session_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录状态已失效，请重新登录。")
+
+    try:
+        auth_session_id = int(session_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录状态已失效，请重新登录。") from None
+
+    session = db.get(AuthSession, auth_session_id)
+    if not session or session.revoked_at or session.expires_at <= datetime.utcnow():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录状态已失效，请重新登录。")
+
+    if session.user.status != "active":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户已被禁用。")
+
+    return session.user
+
+
 def _login_user(*, db: Session, redis: Redis, user: User, request: Request) -> AuthResponse:
     expires_at = datetime.utcnow() + timedelta(seconds=settings.auth_refresh_token_ttl_seconds)
     auth_session = AuthSession(

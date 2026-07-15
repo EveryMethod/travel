@@ -6,8 +6,11 @@ import type {
   OAuthProvider,
   RefreshRequest,
   RegisterRequest,
+  SavedTripDetail,
+  SavedTripListItem,
   TripPlanRequest,
   TripPlanResponse,
+  TripStreamEvent,
 } from '@/types'
 
 const AUTH_TOKEN_KEY = 'travel_auth_tokens'
@@ -21,14 +24,18 @@ export async function planTrip(payload: TripPlanRequest): Promise<TripPlanRespon
 
 export async function planTripStream(
   payload: TripPlanRequest,
-  onEvent: (event: { type: string; message?: string; data?: unknown }) => void,
+  onEvent: (event: TripStreamEvent) => void,
 ): Promise<TripPlanResponse> {
   let response: Response
+  const tokens = getAuthTokens()
 
   try {
     response = await fetch('/api/trips/plan/stream', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(tokens ? { Authorization: `Bearer ${tokens.access_token}` } : {}),
+      },
       body: JSON.stringify(payload),
     })
   } catch {
@@ -53,13 +60,13 @@ export async function planTripStream(
 
     for (const line of lines) {
       if (!line.trim()) continue
-      const event = JSON.parse(line) as { type: string; message?: string; data?: unknown }
+      const event = JSON.parse(line) as TripStreamEvent
       onEvent(event)
       if (event.type === 'error') {
         throw new Error(event.message ?? '规划器暂时无法生成行程。')
       }
       if (event.type === 'plan') {
-        plan = event.data as TripPlanResponse
+        plan = event.data
       }
     }
   }
@@ -68,6 +75,18 @@ export async function planTripStream(
     throw new Error('规划器暂时没有返回完整行程。')
   }
   return plan
+}
+
+export async function listTrips(): Promise<SavedTripListItem[]> {
+  return request<SavedTripListItem[]>('/api/trips')
+}
+
+export async function getTrip(id: number | string): Promise<SavedTripDetail> {
+  return request<SavedTripDetail>(`/api/trips/${id}`)
+}
+
+export async function deleteTrip(id: number | string): Promise<void> {
+  await request<void>(`/api/trips/${id}`, { method: 'DELETE' })
 }
 
 export async function register(payload: RegisterRequest, remember: boolean): Promise<AuthResponse> {

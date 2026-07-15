@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowRight, CalendarDays, CheckCircle2, Compass, MapPinned, Route, Sparkles } from 'lucide-vue-next'
 
+import TripPlanResult from '@/components/TripPlanResult.vue'
 import { getAuthTokens, logout, planTripStream } from '@/services'
 import type { TravelStyle, TripPlanResponse } from '@/types'
 
@@ -47,6 +48,7 @@ const isLoading = ref(false)
 const streamMessage = ref('')
 const streamSteps = ref<string[]>([])
 const dateWarning = ref('')
+const saveMessage = ref('')
 const isLoggedIn = ref(false)
 const router = useRouter()
 
@@ -88,6 +90,7 @@ async function createPlan() {
   }
 
   error.value = ''
+  saveMessage.value = ''
   isLoading.value = true
   plan.value = null
   streamMessage.value = '正在启动路线规划...'
@@ -111,6 +114,7 @@ async function createPlan() {
         streamSteps.value = [...streamSteps.value, event.message]
       }
     })
+    saveMessage.value = '已保存到工作台。'
   } catch (caughtError) {
     plan.value = null
     error.value = caughtError instanceof Error ? caughtError.message : '规划器暂时无法生成行程。'
@@ -181,6 +185,13 @@ function addDays(value: string, days: number): string {
         </nav>
 
         <div class="flex items-center gap-2">
+          <RouterLink
+            v-if="isLoggedIn"
+            to="/workspace"
+            class="rounded-md border border-[#c8c4be] px-3 py-2 text-sm font-medium hover:bg-[#f6f5f4]"
+          >
+            工作台
+          </RouterLink>
           <button
             v-if="isLoggedIn"
             type="button"
@@ -507,58 +518,19 @@ function addDays(value: string, days: number): string {
             </div>
 
             <div v-else class="space-y-4">
-              <div class="grid gap-4 rounded-xl bg-[#f9e79f] p-4 md:grid-cols-[220px_minmax(0,1fr)] md:items-center">
-                <div>
-                  <p class="text-xs font-semibold text-[#523410]">{{ plan.trip_id }}</p>
-                  <h2 class="mt-2 text-3xl font-semibold">{{ plan.destination }}</h2>
+              <div v-if="saveMessage && plan" class="rounded-xl border border-[#1aae39]/30 bg-[#d9f3e1] p-4">
+                <p class="font-semibold text-[#1a1a1a]">{{ saveMessage }}</p>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <RouterLink :to="`/trips/${plan.trip_id}`" class="rounded-md bg-[#0a1530] px-3 py-2 text-sm font-medium text-white hover:bg-[#1a2a52]">
+                    查看本次行程详情
+                  </RouterLink>
+                  <RouterLink to="/workspace" class="rounded-md border border-[#c8c4be] bg-white px-3 py-2 text-sm font-medium hover:bg-[#f6f5f4]">
+                    查看工作台
+                  </RouterLink>
                 </div>
-                <p class="text-sm leading-6 text-[#37352f]">{{ plan.summary }}</p>
               </div>
 
-              <div class="grid gap-4">
-                <article v-for="day in plan.days" :key="`${day.day}-${day.date}`" class="rounded-xl border border-[#e5e3df] p-4">
-                  <div class="grid gap-3 lg:grid-cols-[180px_minmax(0,1fr)]">
-                    <div>
-                      <p class="text-xs font-semibold text-[#5645d4]">第 {{ day.day }} 天 · {{ day.date }}</p>
-                      <h3 class="mt-1 text-lg font-semibold leading-snug">{{ day.title }}</h3>
-                      <div class="mt-3 grid gap-2 text-xs font-medium text-[#5d5b54]">
-                        <p class="rounded-md bg-[#dcecfa] px-3 py-2">{{ day.weather }}</p>
-                        <p class="rounded-md bg-[#f9e79f] px-3 py-2">{{ day.daily_budget }}</p>
-                        <p class="rounded-md bg-[#d9f3e1] px-3 py-2">{{ day.transport }}</p>
-                      </div>
-                    </div>
-
-                    <ol class="grid gap-3">
-                      <li v-for="item in day.items" :key="`${day.date}-${item.time}-${item.place}`" class="grid gap-3 rounded-lg bg-[#fafaf9] p-3 sm:grid-cols-[72px_minmax(0,1fr)]">
-                        <p class="text-sm font-semibold text-[#5645d4]">{{ item.time }}</p>
-                        <div>
-                          <div class="flex flex-wrap items-center gap-2">
-                            <h4 class="font-semibold">{{ item.place }}</h4>
-                            <span class="rounded bg-white px-2 py-1 text-xs font-semibold text-[#793400]">{{ item.estimated_cost }}</span>
-                          </div>
-                          <p class="mt-2 text-sm leading-6 text-[#37352f]">{{ item.activity }}</p>
-                          <div class="mt-2 grid gap-2 text-xs font-medium text-[#5d5b54] md:grid-cols-2">
-                            <p class="rounded-md bg-white px-2 py-1.5">{{ item.booking_hint }}</p>
-                            <p class="rounded-md bg-white px-2 py-1.5">{{ item.source_hint }}</p>
-                          </div>
-                        </div>
-                      </li>
-                    </ol>
-                  </div>
-
-                  <ul class="mt-3 list-disc space-y-1 pl-5 text-sm leading-6 text-[#5d5b54]">
-                    <li v-for="note in day.notes" :key="note">{{ note }}</li>
-                  </ul>
-                </article>
-              </div>
-
-              <div class="rounded-xl bg-[#d9f3e1] p-4">
-                <h3 class="font-semibold">出发前提醒</h3>
-                <ul class="mt-3 grid gap-2 text-sm leading-6 text-[#37352f] md:grid-cols-2">
-                  <li v-for="tip in plan.tips" :key="tip">{{ tip }}</li>
-                </ul>
-                <p class="mt-4 border-t border-[#1aae39]/20 pt-4 text-xs font-semibold text-[#5d5b54]">{{ plan.disclaimer }}</p>
-              </div>
+              <TripPlanResult :plan="plan" />
             </div>
           </aside>
         </div>

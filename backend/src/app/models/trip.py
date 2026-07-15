@@ -1,5 +1,6 @@
 """Trip planning request and response models."""
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -61,3 +62,18 @@ class TripPlanResponse(BaseModel):
     days: list[TripDay]
     tips: list[str]
     disclaimer: str
+
+
+class SavedTripListItem(BaseModel):
+    id: int
+    destination: str
+    days: int
+    status: Literal["completed"]
+    created_at: datetime
+
+
+class SavedTripDetail(SavedTripListItem):
+    trace_id: str | None
+    request_json: TripPlanRequest
+    plan_json: TripPlanResponse
+    updated_at: datetime
