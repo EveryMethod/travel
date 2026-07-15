@@ -94,7 +94,7 @@ def trace_call(kind: str, name: str, input_data: Any, metadata: dict[str, Any] |
         result = func()
         output_summary = summarize_value(result)
         return result
-    except Exception as exc:
+    except BaseException as exc:
         status = "error"
         error_type = exc.__class__.__name__
         error_message = _redact_text(str(exc), 500)
@@ -156,6 +156,8 @@ def _summarize_dict(value: dict[Any, Any], limit: int) -> dict[str, Any]:
     for key, item in islice(value.items(), max_items):
         key_text = str(key)
         safe_key = _redact_text(key_text, limit) if _redact_text(key_text, limit) != key_text else key_text
+        if safe_key in items:
+            safe_key = f"{safe_key}#{len(items)}"
         items[safe_key] = _REDACTED if _is_sensitive_key(key_text) else _summarize(item, limit)
     if len(value) > max_items:
         items["__truncated__"] = {"type": "dict", "length": len(value), "remaining": len(value) - max_items}
@@ -305,6 +307,16 @@ def demo() -> None:
         assert capped["19"] == 19
         assert capped["__truncated__"] == {"type": "dict", "length": 21, "remaining": 1}
         assert summarize_value("abcd", max_chars=0)["prefix"] == ""
+        assert "hunter2" not in _redact_text('{"api_key":"hunter2", "password": "hunter2"}', 500)
+        assert summarize_value({"abcdef": 1, "abcxyz": 2}, max_chars=3) == {"abc": 1, "abc#1": 2}
+
+        _write_record = fake_write
+        try:
+            trace_call("tool.execute", "base-exc", {}, None, lambda: (_ for _ in ()).throw(KeyboardInterrupt("stop")))
+        except KeyboardInterrupt:
+            pass
+        assert records[-1].status == "error"
+        assert records[-1].error_type == "KeyboardInterrupt"
     finally:
         logger.disabled = old_logger_disabled
         _write_record = old_write_record
