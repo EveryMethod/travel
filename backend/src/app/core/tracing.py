@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from collections.abc import Callable, Iterator
+from itertools import islice
 from contextlib import contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, TypeVar
@@ -31,6 +33,7 @@ logger = logging.getLogger(__name__)
 _trace_id: ContextVar[str | None] = ContextVar("trace_id", default=None)
 _span_id: ContextVar[str | None] = ContextVar("span_id", default=None)
 _SENSITIVE_PARTS = ("key", "token", "secret", "password", "authorization", "api_key", "access_token", "refresh_token")
+_REDACTED = "***REDACTED***"
 
 
 @dataclass(frozen=True)
@@ -71,7 +74,12 @@ def trace_call(kind: str, name: str, input_data: Any, metadata: dict[str, Any] |
     if not settings.trace_enabled:
         return func()
 
-    trace_id = current_trace_id() or str(uuid4())
+    trace_token: Token[str | None] | None = None
+    trace_id = current_trace_id()
+    if trace_id is None:
+        trace_id = str(uuid4())
+        trace_token = _trace_id.set(trace_id)
+
     parent_span_id = _span_id.get()
     span_id = str(uuid4())
     span_token = _span_id.set(span_id)
@@ -89,57 +97,113 @@ def trace_call(kind: str, name: str, input_data: Any, metadata: dict[str, Any] |
     except Exception as exc:
         status = "error"
         error_type = exc.__class__.__name__
-        error_message = str(exc)[:500]
+        error_message = _redact_text(str(exc), 500)
         raise
     finally:
-        ended_at = datetime.utcnow()
-        record = CallTraceRecord(
-            trace_id=trace_id,
-            span_id=span_id,
-            parent_span_id=parent_span_id,
-            kind=kind,
-            name=name,
-            status=status,
-            started_at=started_at,
-            ended_at=ended_at,
-            duration_ms=int((time.perf_counter() - started_perf) * 1000),
-            input_summary=summarize_value(input_data),
-            output_summary=output_summary,
-            error_type=error_type,
-            error_message=error_message,
-            metadata=summarize_value(metadata or {}),
-        )
-        _write_record(record)
-        _span_id.reset(span_token)
+        try:
+            ended_at = datetime.utcnow()
+            record = CallTraceRecord(
+                trace_id=trace_id,
+                span_id=span_id,
+                parent_span_id=parent_span_id,
+                kind=kind,
+                name=name,
+                status=status,
+                started_at=started_at,
+                ended_at=ended_at,
+                duration_ms=int((time.perf_counter() - started_perf) * 1000),
+                input_summary=summarize_value(input_data),
+                output_summary=output_summary,
+                error_type=error_type,
+                error_message=error_message,
+                metadata=summarize_value(metadata or {}),
+            )
+            _safe_write_record(record)
+        finally:
+            _span_id.reset(span_token)
+            if trace_token is not None:
+                _trace_id.reset(trace_token)
 
 
 def summarize_value(value: Any, max_chars: int | None = None) -> Any:
-    limit = max_chars or settings.trace_summary_max_chars
+    limit = settings.trace_summary_max_chars if max_chars is None else max_chars
     try:
-        return _summarize(value, limit)
+        return _summarize(value, max(0, limit))
     except Exception as exc:
+        if isinstance(value, dict):
+            return {"type": "dict", "length": len(value), "items": {}}
         return {"summary_error": exc.__class__.__name__}
 
 
 def _summarize(value: Any, limit: int) -> Any:
     if isinstance(value, dict):
-        return {str(key): _summarize_field(str(key), item, limit) for key, item in value.items()}
+        return _summarize_dict(value, limit)
     if isinstance(value, list):
         return {"type": "list", "length": len(value), "items": [_summarize(item, limit) for item in value[:3]]}
     if isinstance(value, tuple):
         return {"type": "tuple", "length": len(value), "items": [_summarize(item, limit) for item in value[:3]]}
     if isinstance(value, str):
-        return value if len(value) <= limit else {"type": "str", "length": len(value), "prefix": value[:limit]}
-    if isinstance(value, int | float | bool) or value is None:
+        redacted = _redact_text(value, limit)
+        return redacted if len(value) <= limit else {"type": "str", "length": len(value), "prefix": redacted}
+    if isinstance(value, (int, float, bool)) or value is None:
         return value
-    return {"type": value.__class__.__name__, "repr": repr(value)[:limit]}
+    return {"type": value.__class__.__name__}
 
 
-def _summarize_field(key: str, value: Any, limit: int) -> Any:
+def _summarize_dict(value: dict[Any, Any], limit: int) -> dict[str, Any]:
+    items: dict[str, Any] = {}
+    for index, (key, item) in enumerate(islice(value.items(), 3)):
+        key_text = str(key)
+        if _is_sensitive_key(key_text):
+            items[f"***REDACTED_KEY_{index}***"] = _REDACTED
+        else:
+            items[_redact_text(key_text, limit)] = _summarize(item, limit)
+    return {"type": "dict", "length": len(value), "items": items}
+
+
+def _is_sensitive_key(key: str) -> bool:
     key_lower = key.lower()
-    if any(part in key_lower for part in _SENSITIVE_PARTS):
-        return "***REDACTED***"
-    return _summarize(value, limit)
+    return any(part in key_lower for part in _SENSITIVE_PARTS)
+
+
+def _redact_text(text: str, limit: int) -> str:
+    redacted = re.sub(
+        r"(?i)\b(authorization\s*[:=]\s*)(bearer\s+)?[^\s,;]+",
+        lambda match: f"{match.group(1)}{match.group(2) or ''}{_REDACTED}",
+        text,
+    )
+    redacted = re.sub(
+        r"(?i)\b((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|key)\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;]+)",
+        lambda match: f"{match.group(1)}{_REDACTED}",
+        redacted,
+    )
+    redacted = re.sub(
+        r"(?i)\b(password|secret|token|api[_-]?key)\b\s+[^\s,;]+",
+        lambda match: f"{match.group(1)} {_REDACTED}",
+        redacted,
+    )
+    return redacted[:limit]
+
+
+def _safe_write_record(record: CallTraceRecord) -> None:
+    try:
+        _write_record(record)
+    except Exception as exc:
+        try:
+            logger.warning(
+                json.dumps(
+                    {
+                        "event": "trace_write_error",
+                        "trace_id": record.trace_id,
+                        "span_id": record.span_id,
+                        "error_type": exc.__class__.__name__,
+                        "error_message": _redact_text(str(exc), 500),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        except Exception:
+            pass
 
 
 def _write_record(record: CallTraceRecord) -> None:
@@ -166,7 +230,7 @@ def _write_record(record: CallTraceRecord) -> None:
                     "trace_id": record.trace_id,
                     "span_id": record.span_id,
                     "error_type": exc.__class__.__name__,
-                    "error_message": str(exc)[:500],
+                    "error_message": _redact_text(str(exc), 500),
                 },
                 ensure_ascii=False,
             )
@@ -181,6 +245,7 @@ def demo() -> None:
 
     global _write_record
     old_write_record = _write_record
+    old_logger_disabled = logger.disabled
     _write_record = fake_write
     try:
         assert current_trace_id() is None
@@ -188,18 +253,59 @@ def demo() -> None:
             assert trace_id == "trace-demo"
             assert current_trace_id() == "trace-demo"
             redacted = summarize_value({"api_key": "secret", "city": "杭州"})
-            assert redacted["api_key"] == "***REDACTED***"
-            assert redacted["city"] == "杭州"
+            assert redacted["items"] == {"***REDACTED_KEY_0***": _REDACTED, "city": "杭州"}
             assert trace_call("mcp.client", "demo_tool", {"city": "杭州"}, None, lambda: {"ok": True}) == {"ok": True}
             try:
-                trace_call("tool.execute", "boom", {}, None, lambda: (_ for _ in ()).throw(ValueError("bad")))
+                trace_call(
+                    "tool.execute",
+                    "boom",
+                    {},
+                    None,
+                    lambda: (_ for _ in ()).throw(ValueError("password=hunter2 token abc")),
+                )
             except ValueError:
                 pass
         assert len(records) == 2
         assert records[0].status == "ok"
         assert records[1].status == "error"
         assert records[1].error_type == "ValueError"
+        assert "hunter2" not in records[1].error_message
+        assert "abc" not in records[1].error_message
+
+        records.clear()
+        trace_call(
+            "outer",
+            "implicit",
+            {},
+            None,
+            lambda: trace_call("inner", "implicit", {}, None, lambda: current_trace_id()),
+        )
+        assert records[0].trace_id == records[1].trace_id
+        assert records[0].parent_span_id == records[1].span_id
+        assert current_trace_id() is None
+
+        logger.disabled = True
+        _write_record = lambda record: (_ for _ in ()).throw(RuntimeError("secret=leak"))
+        assert trace_call("safe", "write", {}, None, lambda: "ok") == "ok"
+        try:
+            trace_call("safe", "error", {}, None, lambda: (_ for _ in ()).throw(ValueError("original")))
+        except ValueError as exc:
+            assert str(exc) == "original"
+        assert current_trace_id() is None
+
+        class SecretRepr:
+            def __repr__(self) -> str:
+                return "password=hunter2"
+
+        object_summary = summarize_value(SecretRepr())
+        assert "repr" not in object_summary
+        assert "hunter2" not in json.dumps(object_summary)
+        capped = summarize_value({"a": 1, "b": 2, "c": 3, "d": 4})
+        assert capped["length"] == 4
+        assert list(capped["items"]) == ["a", "b", "c"]
+        assert summarize_value("abcd", max_chars=0)["prefix"] == ""
     finally:
+        logger.disabled = old_logger_disabled
         _write_record = old_write_record
 
 
