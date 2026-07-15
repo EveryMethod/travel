@@ -143,7 +143,7 @@ def summarize_value(value: Any, max_chars: int | None = None) -> Any:
         return _summarize(value, max(0, limit))
     except Exception as exc:
         if isinstance(value, dict):
-            return {"type": "dict", "length": len(value), "items": {}}
+            return {"type": "dict", "items": {}}
         return {"summary_error": exc.__class__.__name__}
 
 
@@ -155,7 +155,8 @@ def _summarize(value: Any, limit: int) -> Any:
     if isinstance(value, tuple):
         return {"type": "tuple", "length": len(value), "items": [_summarize(item, limit) for item in value[:3]]}
     if isinstance(value, str):
-        redacted = _redact_text(value, limit)
+        prefix = value[:limit]
+        redacted = _redact_text(prefix, limit)
         return redacted if len(value) <= limit else {"type": "str", "length": len(value), "prefix": redacted}
     if isinstance(value, float):
         return value if math.isfinite(value) else {"type": "float", "value": str(value)}
@@ -169,7 +170,8 @@ def _summarize_dict(value: dict[Any, Any], limit: int) -> dict[str, Any]:
     max_items = 20
     for key, item in islice(value.items(), max_items):
         key_text = str(key)
-        safe_key = _redact_text(key_text, limit) if _redact_text(key_text, limit) != key_text else key_text
+        redacted_key = _redact_text(key_text, limit)
+        safe_key = redacted_key if redacted_key != key_text else key_text
         if safe_key in items:
             safe_key = f"{safe_key}#{len(items)}"
         items[safe_key] = _REDACTED if _is_sensitive_key(key_text) else _summarize(item, limit)
@@ -179,14 +181,14 @@ def _summarize_dict(value: dict[Any, Any], limit: int) -> dict[str, Any]:
 
 
 def _is_sensitive_key(key: str) -> bool:
-    key_lower = key.lower()
-    return any(part in key_lower for part in _SENSITIVE_PARTS)
+    key_lower = key.lower().replace("-", "_")
+    return key_lower in _SENSITIVE_PARTS or key_lower.endswith(("_key", "_token", "_secret", "_password"))
 
 
 def _redact_text(text: str, limit: int) -> str:
     redacted = re.sub(
-        r"(?i)([\"']?authorization[\"']?\s*[:=]\s*)(bearer\s+)?(\"[^\"]*\"|'[^']*'|[^\s,;}]+)",
-        lambda match: f"{match.group(1)}{match.group(2) or ''}{_REDACTED}",
+        r"(?i)([\"']?authorization[\"']?\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^,;}]+)",
+        lambda match: f"{match.group(1)}{_REDACTED}",
         text,
     )
     redacted = re.sub(
@@ -195,7 +197,7 @@ def _redact_text(text: str, limit: int) -> str:
         redacted,
     )
     redacted = re.sub(
-        r"(?i)\b(password|secret|token|api[_-]?key)\b\s+[^\s,;]+",
+        r"(?i)\b(password|secret|token|api[_-]?key)\b\s+(?:is\s+)?[^\s,;]+",
         lambda match: f"{match.group(1)} {_REDACTED}",
         redacted,
     )
@@ -224,17 +226,18 @@ def _safe_write_record(record: CallTraceRecord) -> None:
 
 
 def _write_record(record: CallTraceRecord) -> None:
-    log_payload = {
-        "event": "call_trace",
-        "trace_id": record.trace_id,
-        "span_id": record.span_id,
-        "parent_span_id": record.parent_span_id,
-        "kind": record.kind,
-        "name": record.name,
-        "status": record.status,
-        "duration_ms": record.duration_ms,
-    }
-    logger.info(json.dumps(log_payload, ensure_ascii=False))
+    if logger.isEnabledFor(logging.INFO):
+        log_payload = {
+            "event": "call_trace",
+            "trace_id": record.trace_id,
+            "span_id": record.span_id,
+            "parent_span_id": record.parent_span_id,
+            "kind": record.kind,
+            "name": record.name,
+            "status": record.status,
+            "duration_ms": record.duration_ms,
+        }
+        logger.info(json.dumps(log_payload, ensure_ascii=False))
     try:
         from src.app.services.trace_store import write_trace
 
@@ -322,6 +325,9 @@ def demo() -> None:
         assert capped["__truncated__"] == {"type": "dict", "length": 21, "remaining": 1}
         assert summarize_value("abcd", max_chars=0)["prefix"] == ""
         assert "hunter2" not in _redact_text('{"api_key":"hunter2", "password": "hunter2", "Authorization":"Bearer hunter2"}', 500)
+        assert "dXNlcjpwYXNz" not in _redact_text("Authorization: Basic dXNlcjpwYXNz", 500)
+        assert "hunter2" not in _redact_text("password is hunter2", 500)
+        assert summarize_value({"keywords": "西湖", "api_key": "secret"}) == {"keywords": "西湖", "api_key": _REDACTED}
         assert summarize_value({"abcdef": 1, "abcxyz": 2}, max_chars=3) == {"abc": 1, "abc#1": 2}
         assert summarize_value(float("nan")) == {"type": "float", "value": "nan"}
         assert len(_trace_id_for_storage("x" * 100)) == 36
