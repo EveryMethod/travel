@@ -2,7 +2,7 @@
 
 from src.app.core import tracing
 from src.app.graph import trip_planner
-from src.app.models.trip import TripPlanRequest
+from src.app.models.trip import TripDay, TripPlanItem, TripPlanRequest, TripPlanResponse
 
 
 def demo() -> None:
@@ -83,6 +83,156 @@ def demo() -> None:
     assert len(plan.days) == 2
     assert plan.days[0].date == "2026-10-01"
     assert "西湖" in plan.days[0].items[0].place
+
+    structured = TripPlanRequest(
+        destination="京都",
+        days=3,
+        budget_breakdown={"transport": "1200", "hotel": "1800", "food": "900", "tickets": "600"},
+        pace="relaxed",
+        companions="family",
+        must_see="清水寺",
+        avoid="环球影城",
+    )
+    assert structured.budget_breakdown.transport == "1200"
+    assert structured.pace == "relaxed"
+    assert structured.companions == "family"
+    assert structured.must_see == "清水寺"
+    assert structured.avoid == "环球影城"
+
+    assert trip_planner._parse_budget_amount("1200") == 1200
+    assert trip_planner._parse_budget_amount("约 500-800 元") == 800
+    assert trip_planner._parse_budget_amount("需查询官方渠道") is None
+    constraint_state = trip_planner._check_constraints({"request": structured, "context": {}})
+    constraints = constraint_state["constraints"]
+    assert constraints["parsed_budget"] == {"transport": 1200, "hotel": 1800, "food": 900, "tickets": 600}
+    assert constraints["budget_total"] == 4500
+    assert "2 到 3 个活动" in constraints["pace_rule"]
+    assert "降低步行强度" in constraints["companions_rule"]
+    assert constraints["must_see"] == "清水寺"
+    assert constraints["avoid"] == "环球影城"
+
+    risky_plan = TripPlanResponse(
+        trip_id="demo",
+        destination="京都",
+        summary="demo",
+        days=[
+            TripDay(
+                day=1,
+                date="2026-10-01",
+                title="demo",
+                items=[
+                    TripPlanItem(time="09:00", place="环球影城", activity="游玩", estimated_cost="300"),
+                    TripPlanItem(time="09:00", place="咖啡店", activity="早餐", estimated_cost="80"),
+                    TripPlanItem(time="11:00", place="博物馆", activity="参观", estimated_cost="80"),
+                    TripPlanItem(time="14:00", place="商店街", activity="购物", estimated_cost="200"),
+                ],
+                notes=[],
+            )
+        ],
+        tips=[],
+        disclaimer="demo",
+    )
+    reviewed = trip_planner._review_plan(
+        {"request": structured, "context": {}, "constraints": {"budget_total": 500, "must_see": "清水寺", "avoid": "环球影城"}, "plan": risky_plan}
+    )
+    tips = "\n".join(reviewed["plan"].tips)
+    assert "慢游节奏" in tips
+    assert "重复时间" in tips
+    assert "必去地点" in tips
+    assert "避开地点" in tips
+    assert "明显高于预算" in tips
+
+    route_calls = []
+
+    def fake_route_tool(name, arguments):
+        route_calls.append((name, arguments))
+        if name == "amap_geocode":
+            locations = {
+                "故宫": "116.397,39.916",
+                "环球影城": "116.680,39.850",
+                "近处咖啡": "116.681,39.850",
+                "博物馆": "116.404,39.915",
+                "第五站": "116.500,39.900",
+            }
+            return {"geocodes": [{"location": locations[arguments["address"]]}]}
+        if name == "amap_route_distance":
+            if arguments == {"origin": "116.397,39.916", "destination": "116.680,39.850"}:
+                return {"route": {"paths": [{"duration": "3600", "distance": "30000"}]}}
+            return {"route": {"paths": [{"duration": "600", "distance": "3000"}]}}
+        raise AssertionError(name)
+
+    route_plan = TripPlanResponse(
+        trip_id="route-risk",
+        destination="北京",
+        summary="demo",
+        days=[
+            TripDay(
+                day=1,
+                date="2026-10-01",
+                title="demo",
+                items=[
+                    TripPlanItem(time="09:00", place="故宫", activity="参观"),
+                    TripPlanItem(time="11:00", place="环球影城", activity="游玩"),
+                    TripPlanItem(time="15:00", place="近处咖啡", activity="休息"),
+                    TripPlanItem(time="17:00", place="博物馆", activity="参观"),
+                    TripPlanItem(time="20:00", place="第五站", activity="夜游"),
+                ],
+                notes=[],
+            )
+        ],
+        tips=[],
+        disclaimer="demo",
+    )
+
+    old_call_tool = trip_planner.call_tool
+    trip_planner.call_tool = fake_route_tool
+    try:
+        reviewed = trip_planner._review_plan(
+            {"request": structured, "context": {}, "constraints": {}, "plan": route_plan}
+        )
+    finally:
+        trip_planner.call_tool = old_call_tool
+
+    tips = "\n".join(reviewed["plan"].tips)
+    assert "第 1 天 故宫 → 环球影城 通勤约 60 分钟" in tips
+    assert "近处咖啡 → 博物馆 通勤约 10 分钟" not in tips
+    assert len([call for call in route_calls if call[0] == "amap_route_distance"]) == 3
+    assert not any(call[1].get("address") == "第五站" for call in route_calls if call[0] == "amap_geocode")
+
+    def failing_route_tool(name, arguments):
+        raise RuntimeError(name)
+
+    stable_plan = TripPlanResponse(
+        trip_id="route-failure",
+        destination="北京",
+        summary="demo",
+        days=[
+            TripDay(
+                day=1,
+                date="2026-10-01",
+                title="demo",
+                items=[
+                    TripPlanItem(time="09:00", place="故宫", activity="参观"),
+                    TripPlanItem(time="11:00", place="环球影城", activity="游玩"),
+                ],
+                notes=[],
+            )
+        ],
+        tips=["原有提醒"],
+        disclaimer="demo",
+    )
+
+    old_call_tool = trip_planner.call_tool
+    trip_planner.call_tool = failing_route_tool
+    try:
+        reviewed = trip_planner._review_plan(
+            {"request": structured, "context": {}, "constraints": {}, "plan": stable_plan}
+        )
+    finally:
+        trip_planner.call_tool = old_call_tool
+
+    assert reviewed["plan"].tips == ["原有提醒"]
+
     kinds = {record.kind for record in records}
     assert "agent.llm" in kinds
     assert "mcp.client" in kinds
