@@ -196,8 +196,10 @@ def demo() -> None:
     tips = "\n".join(reviewed["plan"].tips)
     assert "第 1 天 故宫 → 环球影城 通勤约 60 分钟" in tips
     assert "近处咖啡 → 博物馆 通勤约 10 分钟" not in tips
-    geocode_addresses = [call[1].get("address") for call in route_calls if call[0] == "amap_geocode"]
+    geocode_calls = [call for call in route_calls if call[0] == "amap_geocode"]
+    geocode_addresses = [call[1].get("address") for call in geocode_calls]
     assert len([call for call in route_calls if call[0] == "amap_route_distance"]) == 3
+    assert all(call[1].get("city") == "北京" for call in geocode_calls)
     assert geocode_addresses.count("环球影城") == 1
     assert not any(address == "第五站" for address in geocode_addresses)
 
