@@ -148,11 +148,11 @@ def demo() -> None:
         route_calls.append((name, arguments))
         if name == "amap_geocode":
             locations = {
-                "故宫": "116.397,39.916",
-                "环球影城": "116.680,39.850",
-                "近处咖啡": "116.681,39.850",
-                "博物馆": "116.404,39.915",
-                "第五站": "116.500,39.900",
+                "北京故宫": "116.397,39.916",
+                "北京环球影城": "116.680,39.850",
+                "北京近处咖啡": "116.681,39.850",
+                "北京博物馆": "116.404,39.915",
+                "北京第五站": "116.500,39.900",
             }
             return {"geocodes": [{"location": locations[arguments["address"]]}]}
         if name == "amap_route_distance":
@@ -196,8 +196,38 @@ def demo() -> None:
     tips = "\n".join(reviewed["plan"].tips)
     assert "第 1 天 故宫 → 环球影城 通勤约 60 分钟" in tips
     assert "近处咖啡 → 博物馆 通勤约 10 分钟" not in tips
+    geocode_addresses = [call[1].get("address") for call in route_calls if call[0] == "amap_geocode"]
     assert len([call for call in route_calls if call[0] == "amap_route_distance"]) == 3
-    assert not any(call[1].get("address") == "第五站" for call in route_calls if call[0] == "amap_geocode")
+    assert all(str(address).startswith("北京") for address in geocode_addresses)
+    assert geocode_addresses.count("北京环球影城") == 1
+    assert not any(address == "北京第五站" for address in geocode_addresses)
+
+    before_blank_routes = len([call for call in route_calls if call[0] == "amap_route_distance"])
+    blank_plan = TripPlanResponse(
+        trip_id="route-blank",
+        destination="北京",
+        summary="demo",
+        days=[
+            TripDay(
+                day=1,
+                date="2026-10-01",
+                title="demo",
+                items=[
+                    TripPlanItem(time="09:00", place="故宫", activity="参观"),
+                    TripPlanItem(time="10:00", place="", activity="休息"),
+                    TripPlanItem(time="11:00", place="环球影城", activity="游玩"),
+                ],
+                notes=[],
+            )
+        ],
+        tips=[],
+        disclaimer="demo",
+    )
+    assert trip_planner._review_route_legs(blank_plan) == []
+    after_blank_routes = len([call for call in route_calls if call[0] == "amap_route_distance"])
+    assert after_blank_routes == before_blank_routes
+    assert trip_planner._route_duration_seconds({"route": []}) is None
+    assert trip_planner._route_duration_seconds({"route": {"paths": [None]}}) is None
 
     def failing_route_tool(name, arguments):
         raise RuntimeError(name)

@@ -431,20 +431,46 @@ def _estimate_plan_cost(plan: TripPlanResponse) -> int | None:
 def _review_route_legs(plan: TripPlanResponse) -> list[str]:
     warnings: list[str] = []
     for day in plan.days:
-        items = [item for item in day.items[:_ROUTE_LEG_MAX_ITEMS_PER_DAY] if item.place.strip()]
+        items = day.items[:_ROUTE_LEG_MAX_ITEMS_PER_DAY]
+        locations = {
+            place: _geocode_place(plan.destination, place)
+            for place in {item.place.strip() for item in items if item.place.strip()}
+        }
         for origin, destination in zip(items, items[1:]):
-            warning = _route_leg_warning(day.day, origin.place.strip(), destination.place.strip())
+            origin_place = origin.place.strip()
+            destination_place = destination.place.strip()
+            if not origin_place or not destination_place:
+                continue
+            warning = _route_leg_warning(
+                day.day,
+                origin_place,
+                destination_place,
+                locations.get(origin_place, ""),
+                locations.get(destination_place, ""),
+            )
             if warning:
                 warnings.append(warning)
     return warnings
 
 
-def _route_leg_warning(day: int, origin_place: str, destination_place: str) -> str | None:
+def _geocode_place(destination: str, place: str) -> str:
     try:
-        origin = _first_location(call_tool("amap_geocode", {"address": origin_place}))
-        destination = _first_location(call_tool("amap_geocode", {"address": destination_place}))
-        if not origin or not destination:
-            return None
+        return _first_location(call_tool("amap_geocode", {"address": f"{destination}{place}"}))
+    except Exception:
+        return ""
+
+
+def _route_leg_warning(
+    day: int,
+    origin_place: str,
+    destination_place: str,
+    origin: str,
+    destination: str,
+) -> str | None:
+    if not origin or not destination:
+        return None
+
+    try:
         route = call_tool("amap_route_distance", {"origin": origin, "destination": destination})
     except Exception:
         return None
@@ -458,8 +484,11 @@ def _route_leg_warning(day: int, origin_place: str, destination_place: str) -> s
 
 
 def _route_duration_seconds(data: dict[str, Any]) -> int | None:
-    paths = (data.get("route") or {}).get("paths") or []
-    if not paths:
+    route = data.get("route") if isinstance(data, dict) else None
+    if not isinstance(route, dict):
+        return None
+    paths = route.get("paths")
+    if not isinstance(paths, list) or not paths or not isinstance(paths[0], dict):
         return None
     try:
         return int(float(str(paths[0].get("duration"))))
