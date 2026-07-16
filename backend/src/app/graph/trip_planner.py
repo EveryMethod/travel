@@ -431,16 +431,11 @@ def _estimate_plan_cost(plan: TripPlanResponse) -> int | None:
 def _review_route_legs(plan: TripPlanResponse) -> list[str]:
     warnings: list[str] = []
     for day in plan.days:
-        items = day.items[:_ROUTE_LEG_MAX_ITEMS_PER_DAY]
-        locations = {
-            place: _geocode_place(plan.destination, place)
-            for place in {item.place.strip() for item in items if item.place.strip()}
-        }
+        items = [item for item in day.items[:_ROUTE_LEG_MAX_ITEMS_PER_DAY] if item.place.strip()]
+        locations = {place: _geocode_place(place) for place in {item.place.strip() for item in items}}
         for origin, destination in zip(items, items[1:]):
             origin_place = origin.place.strip()
             destination_place = destination.place.strip()
-            if not origin_place or not destination_place:
-                continue
             warning = _route_leg_warning(
                 day.day,
                 origin_place,
@@ -453,9 +448,9 @@ def _review_route_legs(plan: TripPlanResponse) -> list[str]:
     return warnings
 
 
-def _geocode_place(destination: str, place: str) -> str:
+def _geocode_place(place: str) -> str:
     try:
-        return _first_location(call_tool("amap_geocode", {"address": f"{destination}{place}"}))
+        return _first_location(call_tool("amap_geocode", {"address": place}))
     except Exception:
         return ""
 

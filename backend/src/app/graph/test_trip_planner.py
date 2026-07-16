@@ -148,11 +148,11 @@ def demo() -> None:
         route_calls.append((name, arguments))
         if name == "amap_geocode":
             locations = {
-                "北京故宫": "116.397,39.916",
-                "北京环球影城": "116.680,39.850",
-                "北京近处咖啡": "116.681,39.850",
-                "北京博物馆": "116.404,39.915",
-                "北京第五站": "116.500,39.900",
+                "故宫": "116.397,39.916",
+                "环球影城": "116.680,39.850",
+                "近处咖啡": "116.681,39.850",
+                "博物馆": "116.404,39.915",
+                "第五站": "116.500,39.900",
             }
             return {"geocodes": [{"location": locations[arguments["address"]]}]}
         if name == "amap_route_distance":
@@ -198,9 +198,8 @@ def demo() -> None:
     assert "近处咖啡 → 博物馆 通勤约 10 分钟" not in tips
     geocode_addresses = [call[1].get("address") for call in route_calls if call[0] == "amap_geocode"]
     assert len([call for call in route_calls if call[0] == "amap_route_distance"]) == 3
-    assert all(str(address).startswith("北京") for address in geocode_addresses)
-    assert geocode_addresses.count("北京环球影城") == 1
-    assert not any(address == "北京第五站" for address in geocode_addresses)
+    assert geocode_addresses.count("环球影城") == 1
+    assert not any(address == "第五站" for address in geocode_addresses)
 
     before_blank_routes = len([call for call in route_calls if call[0] == "amap_route_distance"])
     blank_plan = TripPlanResponse(
@@ -223,9 +222,15 @@ def demo() -> None:
         tips=[],
         disclaimer="demo",
     )
-    assert trip_planner._review_route_legs(blank_plan) == []
+    old_call_tool = trip_planner.call_tool
+    trip_planner.call_tool = fake_route_tool
+    try:
+        blank_warnings = trip_planner._review_route_legs(blank_plan)
+    finally:
+        trip_planner.call_tool = old_call_tool
+    assert "故宫 → 环球影城 通勤约 60 分钟" in "\n".join(blank_warnings)
     after_blank_routes = len([call for call in route_calls if call[0] == "amap_route_distance"])
-    assert after_blank_routes == before_blank_routes
+    assert after_blank_routes == before_blank_routes + 1
     assert trip_planner._route_duration_seconds({"route": []}) is None
     assert trip_planner._route_duration_seconds({"route": {"paths": [None]}}) is None
 
