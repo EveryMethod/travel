@@ -432,6 +432,8 @@ def _review_route_legs(plan: TripPlanResponse) -> list[str]:
     warnings: list[str] = []
     for day in plan.days:
         places = [item.place.strip() for item in day.items if item.place.strip()][:_ROUTE_LEG_MAX_ITEMS_PER_DAY]
+        if len(places) < 2:
+            continue
         locations = {place: _geocode_place(plan.destination, place) for place in set(places)}
         for origin_place, destination_place in zip(places, places[1:]):
             warning = _route_leg_warning(

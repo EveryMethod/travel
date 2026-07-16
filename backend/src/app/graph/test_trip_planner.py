@@ -132,9 +132,14 @@ def demo() -> None:
         tips=[],
         disclaimer="demo",
     )
-    reviewed = trip_planner._review_plan(
-        {"request": structured, "context": {}, "constraints": {"budget_total": 500, "must_see": "清水寺", "avoid": "环球影城"}, "plan": risky_plan}
-    )
+    old_call_tool = trip_planner.call_tool
+    trip_planner.call_tool = lambda name, arguments: (_ for _ in ()).throw(RuntimeError(name))
+    try:
+        reviewed = trip_planner._review_plan(
+            {"request": structured, "context": {}, "constraints": {"budget_total": 500, "must_see": "清水寺", "avoid": "环球影城"}, "plan": risky_plan}
+        )
+    finally:
+        trip_planner.call_tool = old_call_tool
     tips = "\n".join(reviewed["plan"].tips)
     assert "慢游节奏" in tips
     assert "重复时间" in tips
