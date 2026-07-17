@@ -14,6 +14,17 @@ TravelStyle = Literal[
     "adventure",
     "relaxed",
 ]
+TravelPace = Literal["relaxed", "balanced", "packed"]
+TravelCompanions = Literal["solo", "couple", "friends", "family", "seniors"]
+
+
+class BudgetBreakdown(BaseModel):
+    """Structured trip budget inputs."""
+
+    transport: str = ""
+    hotel: str = ""
+    food: str = ""
+    tickets: str = ""
 
 
 class TripPlanRequest(BaseModel):
@@ -23,9 +34,14 @@ class TripPlanRequest(BaseModel):
     origin: str = ""
     days: int = Field(..., ge=1, le=10)
     budget: str = ""
+    budget_breakdown: BudgetBreakdown = Field(default_factory=BudgetBreakdown)
     travel_style: list[TravelStyle] = Field(default_factory=lambda: ["relaxed"])
+    pace: TravelPace = "balanced"
+    companions: TravelCompanions = "friends"
     start_date: str = ""
     end_date: str = ""
+    must_see: str = Field(default="", max_length=300)
+    avoid: str = Field(default="", max_length=300)
     notes: str = Field(default="", max_length=500)
 
 

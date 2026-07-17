@@ -5,7 +5,7 @@ import { ArrowRight, CalendarDays, CheckCircle2, Compass, MapPinned, Route, Spar
 
 import TripPlanResult from '@/components/TripPlanResult.vue'
 import { getAuthTokens, logout, planTripStream } from '@/services'
-import type { TravelStyle, TripPlanResponse } from '@/types'
+import type { TravelCompanions, TravelPace, TravelStyle, TripPlanResponse } from '@/types'
 
 const styleOptions: Array<{ label: string; value: TravelStyle }> = [
   { label: '人文历史', value: 'culture' },
@@ -15,6 +15,20 @@ const styleOptions: Array<{ label: string; value: TravelStyle }> = [
   { label: '浪漫慢游', value: 'romantic' },
   { label: '探索冒险', value: 'adventure' },
   { label: '轻松休闲', value: 'relaxed' },
+]
+
+const paceOptions: Array<{ label: string; value: TravelPace }> = [
+  { label: '慢游', value: 'relaxed' },
+  { label: '适中', value: 'balanced' },
+  { label: '紧凑', value: 'packed' },
+]
+
+const companionOptions: Array<{ label: string; value: TravelCompanions }> = [
+  { label: '独自', value: 'solo' },
+  { label: '情侣', value: 'couple' },
+  { label: '朋友', value: 'friends' },
+  { label: '家庭', value: 'family' },
+  { label: '老人', value: 'seniors' },
 ]
 
 const destinations = [
@@ -36,9 +50,19 @@ const form = reactive({
   origin: '上海',
   days: 1,
   budget: '5000',
+  budget_breakdown: {
+    transport: '1200',
+    hotel: '1800',
+    food: '900',
+    tickets: '600',
+  },
   travel_style: ['culture'] as TravelStyle[],
+  pace: 'balanced' as TravelPace,
+  companions: 'friends' as TravelCompanions,
   start_date: todayIso(),
   end_date: todayIso(),
+  must_see: '故宫',
+  avoid: '',
   notes: '喜欢慢节奏的早晨和本地美食。',
 })
 
@@ -102,9 +126,19 @@ async function createPlan() {
       origin: form.origin.trim(),
       days: form.days,
       budget: form.budget,
+      budget_breakdown: {
+        transport: form.budget_breakdown.transport.trim(),
+        hotel: form.budget_breakdown.hotel.trim(),
+        food: form.budget_breakdown.food.trim(),
+        tickets: form.budget_breakdown.tickets.trim(),
+      },
       travel_style: form.travel_style,
+      pace: form.pace,
+      companions: form.companions,
       start_date: form.start_date,
       end_date: form.end_date,
+      must_see: form.must_see.trim(),
+      avoid: form.avoid.trim(),
       notes: form.notes.trim(),
     }
 
@@ -383,6 +417,32 @@ function addDays(value: string, days: number): string {
               </div>
 
               <div class="block">
+                <span class="text-sm font-medium">分项预算</span>
+                <div class="mt-1.5 grid gap-2 sm:grid-cols-2">
+                  <input v-model="form.budget_breakdown.transport" inputmode="numeric" class="h-10 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-sm outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" placeholder="交通 1200" />
+                  <input v-model="form.budget_breakdown.hotel" inputmode="numeric" class="h-10 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-sm outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" placeholder="住宿 1800" />
+                  <input v-model="form.budget_breakdown.food" inputmode="numeric" class="h-10 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-sm outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" placeholder="餐饮 900" />
+                  <input v-model="form.budget_breakdown.tickets" inputmode="numeric" class="h-10 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-sm outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" placeholder="门票 600" />
+                </div>
+              </div>
+
+              <div class="grid gap-3 sm:grid-cols-2">
+                <label class="block">
+                  <span class="text-sm font-medium">旅行节奏</span>
+                  <select v-model="form.pace" class="mt-1.5 h-10 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]">
+                    <option v-for="option in paceOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                  </select>
+                </label>
+
+                <label class="block">
+                  <span class="text-sm font-medium">同行人</span>
+                  <select v-model="form.companions" class="mt-1.5 h-10 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]">
+                    <option v-for="option in companionOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="block">
                 <span class="text-sm font-medium">出行日期</span>
                 <div class="mt-1.5 grid gap-2 sm:grid-cols-2">
                   <input v-model="form.start_date" type="date" class="h-10 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-sm outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" />
@@ -402,9 +462,21 @@ function addDays(value: string, days: number): string {
                 </p>
               </div>
 
+              <div class="grid gap-3 sm:grid-cols-2">
+                <label class="block">
+                  <span class="text-sm font-medium">必去地点</span>
+                  <input v-model="form.must_see" class="mt-1.5 h-10 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" placeholder="清水寺、故宫" />
+                </label>
+
+                <label class="block">
+                  <span class="text-sm font-medium">避开地点</span>
+                  <input v-model="form.avoid" class="mt-1.5 h-10 w-full rounded-md border border-[#c8c4be] bg-white px-3 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" placeholder="太拥挤的商圈" />
+                </label>
+              </div>
+
               <label class="block">
                 <span class="text-sm font-medium">补充偏好</span>
-                <textarea v-model="form.notes" rows="2" class="mt-1.5 w-full rounded-md border border-[#c8c4be] bg-white px-3 py-2 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" placeholder="美食、节奏、必去地点、同行人情况等..." />
+                <textarea v-model="form.notes" rows="2" class="mt-1.5 w-full rounded-md border border-[#c8c4be] bg-white px-3 py-2 text-base outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" placeholder="美食、节奏、同行人情况等..." />
               </label>
 
               <p v-if="error" id="planner-error" class="rounded-md border border-[#e03131]/30 bg-[#fde0ec] px-3 py-2 text-sm font-medium text-[#a02e6d]" role="alert">

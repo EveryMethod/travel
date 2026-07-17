@@ -7,14 +7,30 @@ export type TravelStyle =
   | 'adventure'
   | 'relaxed'
 
+export type TravelPace = 'relaxed' | 'balanced' | 'packed'
+
+export type TravelCompanions = 'solo' | 'couple' | 'friends' | 'family' | 'seniors'
+
+export interface BudgetBreakdown {
+  transport: string
+  hotel: string
+  food: string
+  tickets: string
+}
+
 export interface TripPlanRequest {
   destination: string
   origin: string
   days: number
   budget: string
+  budget_breakdown: BudgetBreakdown
   travel_style: TravelStyle[]
+  pace: TravelPace
+  companions: TravelCompanions
   start_date: string
   end_date: string
+  must_see: string
+  avoid: string
   notes: string
 }
 
