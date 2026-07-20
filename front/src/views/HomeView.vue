@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { ArrowRight, CalendarDays, CheckCircle2, Compass, MapPinned, Route, Sparkles } from 'lucide-vue-next'
 
 import { getAuthTokens, logout, planTripStream } from '@/services'
-import type { TravelStyle, TripPlanResponse } from '@/types'
+import type { TravelCompanions, TravelPace, TravelStyle, TripPlanResponse } from '@/types'
 
 const styleOptions: Array<{ label: string; value: TravelStyle }> = [
   { label: '人文历史', value: 'culture' },
@@ -16,18 +16,19 @@ const styleOptions: Array<{ label: string; value: TravelStyle }> = [
   { label: '轻松休闲', value: 'relaxed' },
 ]
 
-const paceOptions = [
-  { label: '适中', value: 'moderate' },
+const paceOptions: Array<{ label: string; value: TravelPace }> = [
+  { label: '适中', value: 'balanced' },
   { label: '轻松', value: 'relaxed' },
   { label: '紧凑', value: 'packed' },
-] as const
+]
 
-const companionOptions = [
+const companionOptions: Array<{ label: string; value: TravelCompanions }> = [
   { label: '朋友', value: 'friends' },
   { label: '独自出行', value: 'solo' },
   { label: '情侣', value: 'couple' },
   { label: '家庭', value: 'family' },
-] as const
+  { label: '老人', value: 'seniors' },
+]
 
 const budgetBreakdownFields = [
   { key: 'transport', label: '交通', placeholder: '1200' },
@@ -90,8 +91,8 @@ const form = reactive({
   travel_style: ['culture'] as TravelStyle[],
   start_date: todayIso(),
   end_date: todayIso(),
-  pace: '',
-  companions: '',
+  pace: '' as TravelPace | '',
+  companions: '' as TravelCompanions | '',
   must_see: '',
   avoid: '',
   budget_breakdown: {
@@ -200,9 +201,19 @@ async function createPlan() {
       origin: form.origin.trim(),
       days: form.days,
       budget: form.budget,
+      budget_breakdown: {
+        transport: form.budget_breakdown.transport.trim(),
+        hotel: form.budget_breakdown.hotel.trim(),
+        food: form.budget_breakdown.food.trim(),
+        tickets: form.budget_breakdown.tickets.trim(),
+      },
       travel_style: form.travel_style,
+      pace: form.pace || 'balanced',
+      companions: form.companions || 'friends',
       start_date: form.start_date,
       end_date: form.end_date,
+      must_see: form.must_see.trim(),
+      avoid: form.avoid.trim(),
       notes: submittedNotes.value,
     }
 
