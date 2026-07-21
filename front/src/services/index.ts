@@ -48,6 +48,10 @@ export async function planTripStream(
   }
 
   if (!response.ok || !response.body) {
+    const traceId = response.headers.get('X-Trace-Id')
+    if (traceId) {
+      onEvent({ type: 'trace', trace_id: traceId })
+    }
     throw new Error(await getErrorMessage(response))
   }
 
@@ -290,5 +294,6 @@ async function getErrorMessage(response: Response): Promise<string> {
     return '无法连接后端 API，请确认服务正在运行。'
   }
 
-  return '请求失败，请稍后重试。'
+  const detail = body.trim().slice(0, 160)
+  return detail ? `请求失败（HTTP ${response.status}）：${detail}` : `请求失败（HTTP ${response.status}），请稍后重试。`
 }
