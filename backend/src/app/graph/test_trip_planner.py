@@ -111,6 +111,51 @@ def demo() -> None:
     assert constraints["must_see"] == "清水寺"
     assert constraints["avoid"] == "环球影城"
 
+    map_request = TripPlanRequest(destination="北京", origin="上海", days=1, travel_style=["culture", "food"])
+    old_call_tool = trip_planner.call_tool
+    trip_planner.call_tool = lambda name, arguments: (_ for _ in ()).throw(RuntimeError(name))
+    try:
+        map_state = trip_planner._collect_map_context({"request": map_request})
+    finally:
+        trip_planner.call_tool = old_call_tool
+    assert map_state["context"]["pois"]
+    assert all(result == {"pois": []} for result in map_state["context"]["pois"])
+    assert map_state["context"]["weather"] == {"lives": []}
+    assert map_state["context"]["routes"] == []
+    assert trip_planner._compact_context(map_state["context"])["pois"] == []
+    assert trip_planner._compact_context(map_state["context"])["weather"] == []
+
+    partial_calls = []
+
+    def partially_failing_map_tool(name, arguments):
+        partial_calls.append((name, arguments))
+        if name == "amap_search_poi" and arguments["keywords"] == "美食":
+            raise RuntimeError("poi failed")
+        if name == "amap_search_poi":
+            return {"pois": [{"name": "故宫", "type": "景点", "address": "北京", "location": "116.397,39.916"}]}
+        if name == "amap_weather":
+            raise RuntimeError("weather failed")
+        if name == "amap_geocode":
+            return {"geocodes": [{"location": "116.397,39.916"}]}
+        if name == "amap_route_distance":
+            raise RuntimeError("route failed")
+        raise AssertionError(name)
+
+    old_call_tool = trip_planner.call_tool
+    trip_planner.call_tool = partially_failing_map_tool
+    try:
+        partial_state = trip_planner._collect_map_context({"request": map_request})
+    finally:
+        trip_planner.call_tool = old_call_tool
+    compacted_partial = trip_planner._compact_context(partial_state["context"])
+    assert "故宫" in [poi["name"] for poi in compacted_partial["pois"]]
+    assert {"pois": []} in partial_state["context"]["pois"]
+    assert any(call[0] == "amap_search_poi" and call[1]["keywords"] == "餐厅" for call in partial_calls)
+    assert compacted_partial["weather"] == []
+    assert partial_state["context"]["routes"] == []
+    assert any(call[0] == "amap_route_distance" for call in partial_calls)
+
+    review_request = structured.model_copy(update={"days": 1})
     risky_plan = TripPlanResponse(
         trip_id="demo",
         destination="京都",
@@ -132,13 +177,16 @@ def demo() -> None:
         tips=[],
         disclaimer="demo",
     )
+    old_generate_json = trip_planner.generate_json
     old_call_tool = trip_planner.call_tool
+    trip_planner.generate_json = lambda messages: (_ for _ in ()).throw(RuntimeError("repair failed"))
     trip_planner.call_tool = lambda name, arguments: (_ for _ in ()).throw(RuntimeError(name))
     try:
         reviewed = trip_planner._review_plan(
-            {"request": structured, "context": {}, "constraints": {"budget_total": 500, "must_see": "清水寺", "avoid": "环球影城"}, "plan": risky_plan}
+            {"request": review_request, "context": {}, "constraints": {"budget_total": 500, "must_see": "清水寺", "avoid": "环球影城"}, "plan": risky_plan}
         )
     finally:
+        trip_planner.generate_json = old_generate_json
         trip_planner.call_tool = old_call_tool
     tips = "\n".join(reviewed["plan"].tips)
     assert "慢游节奏" in tips
@@ -146,6 +194,76 @@ def demo() -> None:
     assert "必去地点" in tips
     assert "避开地点" in tips
     assert "明显高于预算" in tips
+
+    repair_calls = []
+    repair_plan = risky_plan.model_copy(update={"tips": ["原有出行提醒"]}, deep=True)
+    repaired_json = repair_plan.model_dump()
+    repaired_json["days"][0]["items"] = [
+        {
+            "time": "09:00",
+            "place": "清水寺",
+            "activity": "参观必去地点",
+            "estimated_cost": "80",
+            "booking_hint": "提前预约",
+            "source_hint": "修复测试",
+        }
+    ]
+    repaired_json["tips"] = []
+
+    def fake_repair_json(messages):
+        repair_calls.append(messages)
+        return repaired_json
+
+    old_generate_json = trip_planner.generate_json
+    old_call_tool = trip_planner.call_tool
+    trip_planner.generate_json = fake_repair_json
+    trip_planner.call_tool = lambda name, arguments: (_ for _ in ()).throw(RuntimeError(name))
+    try:
+        repaired = trip_planner._review_plan(
+            {
+                "request": review_request,
+                "context": {},
+                "constraints": {"budget_total": 500, "must_see": "清水寺", "avoid": "环球影城"},
+                "plan": repair_plan,
+            }
+        )["plan"]
+    finally:
+        trip_planner.generate_json = old_generate_json
+        trip_planner.call_tool = old_call_tool
+
+    assert len(repair_calls) == 1
+    assert repaired.days[0].items[0].place == "清水寺"
+    assert "原有出行提醒" in repaired.tips
+    assert "环球影城" not in trip_planner._plan_text(repaired)
+    assert not any("避开地点" in tip for tip in repaired.tips)
+
+    def failing_repair_json(messages):
+        repair_calls.append(messages)
+        raise RuntimeError("repair failed")
+
+    fallback_plan = risky_plan.model_copy(deep=True)
+    old_generate_json = trip_planner.generate_json
+    old_call_tool = trip_planner.call_tool
+    trip_planner.generate_json = failing_repair_json
+    trip_planner.call_tool = lambda name, arguments: (_ for _ in ()).throw(RuntimeError(name))
+    try:
+        fallback = trip_planner._review_plan(
+            {
+                "request": review_request,
+                "context": {},
+                "constraints": {"budget_total": 500, "must_see": "清水寺", "avoid": "环球影城"},
+                "plan": fallback_plan,
+            }
+        )["plan"]
+    finally:
+        trip_planner.generate_json = old_generate_json
+        trip_planner.call_tool = old_call_tool
+
+    assert fallback is fallback_plan
+    fallback_tips = "\n".join(fallback.tips)
+    assert "重复时间" in fallback_tips
+    assert "必去地点" in fallback_tips
+    assert "避开地点" in fallback_tips
 
     route_calls = []
 
@@ -189,13 +307,16 @@ def demo() -> None:
         disclaimer="demo",
     )
 
+    old_generate_json = trip_planner.generate_json
     old_call_tool = trip_planner.call_tool
+    trip_planner.generate_json = lambda messages: (_ for _ in ()).throw(RuntimeError("repair failed"))
     trip_planner.call_tool = fake_route_tool
     try:
         reviewed = trip_planner._review_plan(
             {"request": structured, "context": {}, "constraints": {}, "plan": route_plan}
         )
     finally:
+        trip_planner.generate_json = old_generate_json
         trip_planner.call_tool = old_call_tool
 
     tips = "\n".join(reviewed["plan"].tips)

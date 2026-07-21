@@ -25,6 +25,7 @@ export async function planTrip(payload: TripPlanRequest): Promise<TripPlanRespon
 export async function planTripStream(
   payload: TripPlanRequest,
   onEvent: (event: TripStreamEvent) => void,
+  options: { signal?: AbortSignal } = {},
 ): Promise<TripPlanResponse> {
   let response: Response
   const tokens = getAuthTokens()
@@ -37,8 +38,12 @@ export async function planTripStream(
         ...(tokens ? { Authorization: `Bearer ${tokens.access_token}` } : {}),
       },
       body: JSON.stringify(payload),
+      signal: options.signal,
     })
-  } catch {
+  } catch (caughtError) {
+    if (isAbortError(caughtError)) {
+      throw caughtError
+    }
     throw new Error('无法连接后端 API，请确认服务正在运行。')
   }
 
@@ -49,32 +54,67 @@ export async function planTripStream(
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
   let buffer = ''
   let plan: TripPlanResponse | null = null
+  let finished = false
 
-  for (;;) {
-    const { value, done } = await reader.read()
-    if (done) break
+  const handleLine = (line: string) => {
+    if (!line.trim()) return
+    const event = parseTripStreamEvent(line)
+    onEvent(event)
+    if (event.type === 'error') {
+      throw new Error(event.message ?? '规划器暂时无法生成行程。')
+    }
+    if (event.type === 'plan') {
+      plan = event.data
+    }
+  }
 
-    buffer += value
-    const lines = buffer.split('\n')
-    buffer = lines.pop() ?? ''
-
-    for (const line of lines) {
-      if (!line.trim()) continue
-      const event = JSON.parse(line) as TripStreamEvent
-      onEvent(event)
-      if (event.type === 'error') {
-        throw new Error(event.message ?? '规划器暂时无法生成行程。')
+  try {
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) {
+        finished = true
+        break
       }
-      if (event.type === 'plan') {
-        plan = event.data
+
+      buffer += value
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+
+      for (const line of lines) {
+        handleLine(line)
       }
     }
+
+    if (buffer.trim()) {
+      handleLine(buffer)
+    }
+  } finally {
+    if (!finished) {
+      try {
+        await reader.cancel()
+      } catch {
+        // Reader cleanup is best-effort; preserve the original stream error.
+      }
+    }
+    reader.releaseLock()
   }
 
   if (!plan) {
     throw new Error('规划器暂时没有返回完整行程。')
   }
   return plan
+}
+
+export function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
+function parseTripStreamEvent(line: string): TripStreamEvent {
+  try {
+    return JSON.parse(line) as TripStreamEvent
+  } catch {
+    throw new Error('规划器返回了无法解析的进度数据，请稍后重试。')
+  }
 }
 
 export async function listTrips(): Promise<SavedTripListItem[]> {

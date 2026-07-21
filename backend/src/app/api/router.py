@@ -62,31 +62,38 @@ def stream_plan_trip(
 ) -> StreamingResponse:
     """Stream trip planning progress and save the final plan as NDJSON."""
 
-    trace_id = http_request.headers.get("X-Trace-Id") or str(uuid4())
+    with trace_context(http_request.headers.get("X-Trace-Id") or str(uuid4())) as trace_id:
+        pass
     user_id = current_user.id
 
     def events() -> Iterator[str]:
-        with trace_context(trace_id) as active_trace_id:
-            yield json.dumps({"type": "trace", "trace_id": active_trace_id}, ensure_ascii=False) + "\n"
-            try:
-                for event in stream_trip_with_graph(request):
-                    if event.get("type") == "plan":
-                        plan = TripPlanResponse.model_validate(event["data"])
-                        with SessionLocal() as db:
-                            saved_plan = create_completed_trip(
-                                db=db,
-                                user_id=user_id,
-                                trace_id=active_trace_id,
-                                request=request,
-                                plan=plan,
-                            )
-                        yield json.dumps({"type": "plan", "data": saved_plan.model_dump()}, ensure_ascii=False) + "\n"
-                        continue
-                    yield json.dumps(event, ensure_ascii=False) + "\n"
-            except LLMTimeoutError:
-                yield json.dumps({"type": "error", "message": "大模型响应超时，请稍后再试。"}, ensure_ascii=False) + "\n"
-            except Exception:
-                yield json.dumps({"type": "error", "message": "规划器暂时无法生成行程。"}, ensure_ascii=False) + "\n"
+        # ponytail: StreamingResponse advances sync generators across contexts; don't hold ContextVar tokens across yields.
+        yield json.dumps({"type": "trace", "trace_id": trace_id}, ensure_ascii=False) + "\n"
+        try:
+            planner = stream_trip_with_graph(request)
+            while True:
+                try:
+                    with trace_context(trace_id):
+                        event = next(planner)
+                except StopIteration:
+                    break
+                if event.get("type") == "plan":
+                    plan = TripPlanResponse.model_validate(event["data"])
+                    with SessionLocal() as db:
+                        saved_plan = create_completed_trip(
+                            db=db,
+                            user_id=user_id,
+                            trace_id=trace_id,
+                            request=request,
+                            plan=plan,
+                        )
+                    yield json.dumps({"type": "plan", "data": saved_plan.model_dump()}, ensure_ascii=False) + "\n"
+                    continue
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+        except LLMTimeoutError:
+            yield json.dumps({"type": "error", "message": "大模型响应超时，请稍后再试。"}, ensure_ascii=False) + "\n"
+        except Exception:
+            yield json.dumps({"type": "error", "message": "规划器暂时无法生成行程。"}, ensure_ascii=False) + "\n"
 
     return StreamingResponse(events(), media_type="application/x-ndjson", headers={"X-Trace-Id": trace_id})
 

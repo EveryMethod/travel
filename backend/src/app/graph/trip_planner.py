@@ -95,28 +95,37 @@ def _collect_map_context(state: TripPlannerState) -> TripPlannerState:
 
     for keyword in keywords:
         context["pois"].append(
-            call_tool(
+            _safe_call_tool(
                 "amap_search_poi",
                 {"city": request.destination, "keywords": keyword, "offset": 8},
+                {"pois": []},
             )
         )
 
-    context["weather"] = call_tool("amap_weather", {"city": request.destination})
+    context["weather"] = _safe_call_tool("amap_weather", {"city": request.destination}, {"lives": []})
 
     if request.origin:
-        origin = call_tool("amap_geocode", {"address": request.origin})
-        destination = call_tool("amap_geocode", {"address": request.destination})
+        origin = _safe_call_tool("amap_geocode", {"address": request.origin}, {"geocodes": []})
+        destination = _safe_call_tool("amap_geocode", {"address": request.destination}, {"geocodes": []})
         origin_location = _first_location(origin)
         destination_location = _first_location(destination)
         if origin_location and destination_location:
-            context["routes"].append(
-                call_tool(
-                    "amap_route_distance",
-                    {"origin": origin_location, "destination": destination_location},
-                )
+            route = _safe_call_tool(
+                "amap_route_distance",
+                {"origin": origin_location, "destination": destination_location},
+                {},
             )
+            if route:
+                context["routes"].append(route)
 
     return {"request": request, "context": context}
+
+
+def _safe_call_tool(name: str, arguments: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return call_tool(name, arguments)
+    except Exception:
+        return fallback
 
 
 def _collect_price_context(state: TripPlannerState) -> TripPlannerState:
@@ -277,6 +286,27 @@ def _review_plan(state: TripPlannerState) -> TripPlannerState:
     request = state["request"]
     plan = state["plan"]
     constraints = state.get("constraints", {})
+
+    warnings = _review_warnings(request, plan, constraints)
+    if warnings:
+        original_tips = list(plan.tips)
+        try:
+            plan = _repair_plan(request, plan, constraints, warnings)
+            for tip in original_tips:
+                if tip not in plan.tips:
+                    plan.tips.append(tip)
+            warnings = _review_warnings(request, plan, constraints)
+        except Exception:
+            pass
+
+    for warning in warnings:
+        if warning not in plan.tips:
+            plan.tips.append(warning)
+
+    return {"request": request, "context": state.get("context", {}), "constraints": constraints, "plan": plan}
+
+
+def _review_warnings(request: TripPlanRequest, plan: TripPlanResponse, constraints: dict[str, Any]) -> list[str]:
     warnings: list[str] = []
 
     max_items = {"relaxed": 3, "balanced": 3, "packed": 4}.get(request.pace, 3)
@@ -304,12 +334,45 @@ def _review_plan(state: TripPlannerState) -> TripPlannerState:
         warnings.append(f"可解析费用约 {estimated_cost} 元，已明显高于预算 {budget_total} 元，请压缩活动或提高预算。")
 
     warnings.extend(_review_route_legs(plan))
+    return warnings
 
-    for warning in warnings:
-        if warning not in plan.tips:
-            plan.tips.append(warning)
 
-    return {"request": request, "context": state.get("context", {}), "constraints": constraints, "plan": plan}
+def _repair_plan(
+    request: TripPlanRequest,
+    plan: TripPlanResponse,
+    constraints: dict[str, Any],
+    warnings: list[str],
+) -> TripPlanResponse:
+    repaired = generate_json(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "你是中文旅行规划修复器。必须只输出 JSON object，字段严格匹配："
+                    "trip_id,destination,summary,days,tips,disclaimer。"
+                    "只修复 warnings 指出的行程问题，不新增与用户需求无关的地点或活动。"
+                    "保持天数不变，避免重复时间，移除 avoid，补齐 must_see，并控制预算和通勤风险。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "request": request.model_dump(),
+                        "plan": plan.model_dump(),
+                        "constraints": constraints,
+                        "warnings": warnings,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+    )
+    repaired_plan = TripPlanResponse.model_validate(_normalize_plan_shape(repaired))
+    repaired_plan.days = repaired_plan.days[: request.days]
+    if len(repaired_plan.days) != request.days:
+        raise ValueError("LLM repaired itinerary has the wrong number of days.")
+    return repaired_plan
 
 
 def _normalize_plan_shape(value: dict[str, Any]) -> dict[str, Any]:

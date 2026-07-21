@@ -1,1 +1,1 @@
-// Composables will be exported from this directory.
+export { useTripGeneration } from './useTripGeneration'
