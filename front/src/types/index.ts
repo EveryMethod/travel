@@ -11,6 +11,61 @@ export type TravelPace = 'relaxed' | 'balanced' | 'packed'
 
 export type TravelCompanions = 'solo' | 'couple' | 'friends' | 'family' | 'seniors'
 
+export type TransportMode = 'flight' | 'rail' | 'drive'
+
+export type TransportDataQuality = 'live' | 'provider_live' | 'estimate'
+
+export interface TravelerParty {
+  adults: number
+  children: number
+  infants: number
+}
+
+export interface TransportSegment {
+  service_number: string
+  carrier: string
+  departure_at: string | null
+  arrival_at: string | null
+  from_terminal: string
+  to_terminal: string
+}
+
+export interface TransportLeg {
+  direction: 'outbound' | 'return'
+  departure_at: string | null
+  arrival_at: string | null
+  duration_minutes: number | null
+  transfer_count: number
+  segments: TransportSegment[]
+}
+
+export interface TransportOption {
+  id: string
+  mode: TransportMode
+  provider: string
+  data_quality: TransportDataQuality
+  total_price: string
+  currency: string
+  estimated_price_range: string
+  fare_details: string[]
+  outbound: TransportLeg
+  return_leg: TransportLeg
+  booking_hint: string
+  source_url: string
+}
+
+export interface IntercityTransportPlan {
+  origin: string
+  destination: string
+  recommended_option_id: string | null
+  recommendation_reason: string
+  options: TransportOption[]
+  destination_ready_at: string | null
+  destination_depart_by: string | null
+  searched_at: string
+  warnings: string[]
+}
+
 export interface BudgetBreakdown {
   transport: string
   hotel: string
@@ -32,6 +87,12 @@ export interface TripPlanRequest {
   must_see: string
   avoid: string
   notes: string
+  revision_instructions?: string[]
+  travelers: TravelerParty
+}
+
+export interface TripRevisionRequest {
+  instruction: string
 }
 
 export interface TripPlanItem {
@@ -61,6 +122,7 @@ export interface TripPlanResponse {
   days: TripDay[]
   tips: string[]
   disclaimer: string
+  intercity_transport?: IntercityTransportPlan | null
 }
 
 export interface SavedTripListItem {

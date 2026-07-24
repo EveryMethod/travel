@@ -86,53 +86,6 @@ const features = [
   { icon: CheckCircle2, title: '提醒完整', description: '保留交通、预约、天气和开放时间的核对意识。' },
 ]
 
-const generationStages = [
-  {
-    key: 'requirements',
-    title: '整理旅行需求',
-    description: '读取目的地、日期、预算、节奏和同行人偏好。',
-    matchers: ['整理旅行需求'],
-  },
-  {
-    key: 'map',
-    title: '查询目的地信息',
-    description: '检索景点、天气、起终点和基础动线。',
-    matchers: ['查询目的地', '天气', '路线数据'],
-  },
-  {
-    key: 'price',
-    title: '搜索价格参考',
-    description: '查找门票、车票和预算相关信息。',
-    matchers: ['搜索门票', '车票', '预算参考'],
-  },
-  {
-    key: 'constraints',
-    title: '整理偏好约束',
-    description: '合并预算拆分、必去、避开和旅行节奏。',
-    matchers: ['整理预算', '偏好约束'],
-  },
-  {
-    key: 'draft',
-    title: '生成路线草案',
-    description: '按具体日期和时间点生成每日安排。',
-    matchers: ['大模型生成', '路线草案'],
-  },
-  {
-    key: 'validate',
-    title: '校验行程格式',
-    description: '检查返回结构、天数和字段完整性。',
-    matchers: ['校验', '行程格式'],
-  },
-  {
-    key: 'review',
-    title: '检查可执行性',
-    description: '检查预算、重复时间和跨区通勤风险。',
-    matchers: ['检查预算', '可执行性'],
-  },
-] as const
-
-type GenerationStageKey = (typeof generationStages)[number]['key']
-
 const form = reactive({
   destination: '北京',
   origin: '上海',
@@ -151,23 +104,25 @@ const form = reactive({
     food: '',
     tickets: '',
   },
+  travelers: {
+    adults: 1,
+    children: 0,
+    infants: 0,
+  },
   notes: '',
 })
 
-const currentStageKey = ref<GenerationStageKey>('requirements')
 const {
   plan,
   error,
   isGenerating: isLoading,
-  isComplete: isPlanComplete,
   isCancelled,
   traceId,
-  lastStatus: streamMessage,
   streamSteps,
   generate,
   cancel: cancelGeneration,
   reset: resetGeneration,
-} = useTripGeneration(updateCurrentStage)
+} = useTripGeneration()
 const copyMessage = ref('')
 const manualCopyMarkdown = ref('')
 const reuseMessage = ref('')
@@ -178,8 +133,29 @@ const notesMaxLength = 500
 const REUSE_TRIP_REQUEST_KEY = 'travel_reuse_trip_request'
 
 const maxEndDate = computed(() => addDays(form.start_date, 9))
-const notesTooLong = computed(() => submittedNotes.value.length > notesMaxLength)
-const canSubmit = computed(() => form.destination.trim().length > 0 && form.days >= 1 && form.days <= 10 && form.travel_style.length > 0 && !notesTooLong.value && !isLoading.value)
+const notesTooLong = computed(() => form.notes.trim().length > notesMaxLength)
+const travelerValidation = computed(() => {
+  const adultsInvalid = !Number.isInteger(form.travelers.adults) || form.travelers.adults < 1 || form.travelers.adults > 9
+  const childrenInvalid = !Number.isInteger(form.travelers.children) || form.travelers.children < 0 || form.travelers.children > 8
+  const infantCountInvalid = !Number.isInteger(form.travelers.infants) || form.travelers.infants < 0 || form.travelers.infants > 9
+  const infantCompanionInvalid = !infantCountInvalid && !adultsInvalid && form.travelers.infants > form.travelers.adults
+
+  return {
+    adultsInvalid,
+    childrenInvalid,
+    infantsInvalid: infantCountInvalid || infantCompanionInvalid,
+    message: adultsInvalid
+      ? '成人数须为 1 至 9 的整数。'
+      : childrenInvalid
+        ? '儿童数须为 0 至 8 的整数。'
+        : infantCountInvalid
+          ? '婴儿数须为 0 至 9 的整数。'
+          : infantCompanionInvalid
+            ? '每名婴儿需由一名成人陪同，婴儿人数不能超过成人数。'
+            : '',
+  }
+})
+const canSubmit = computed(() => form.destination.trim().length > 0 && form.days >= 1 && form.days <= 10 && form.travel_style.length > 0 && !travelerValidation.value.message && !notesTooLong.value && !isLoading.value)
 const destinationHasError = computed(() => error.value.length > 0 && form.destination.trim().length === 0)
 const selectedStyleLabels = computed(() => styleOptions.filter((option) => form.travel_style.includes(option.value)).map((option) => option.label).join('、'))
 const paceLabel = computed(() => paceOptions.find((option) => option.value === form.pace)?.label ?? '')
@@ -191,18 +167,6 @@ const budgetBreakdownText = computed(() => budgetBreakdownFields
   })
   .filter(Boolean)
   .join('，'))
-const submittedNotes = computed(() => {
-  const items = [
-    form.notes.trim(),
-    form.pace ? `节奏：${paceLabel.value}` : '',
-    form.companions ? `同行人：${companionLabel.value}` : '',
-    form.must_see.trim() ? `必去：${form.must_see.trim()}` : '',
-    form.avoid.trim() ? `避开：${form.avoid.trim()}` : '',
-    budgetBreakdownText.value ? `分项预算：${budgetBreakdownText.value}` : '',
-  ].filter(Boolean)
-
-  return items.join('；\n')
-})
 const optionalSummaryItems = computed(() => [
   { label: '必去', value: form.must_see.trim() },
   { label: '避开', value: form.avoid.trim() },
@@ -218,14 +182,9 @@ const summaryItems = computed(() => [
   { label: '预算', value: form.budget.trim() ? `¥${form.budget.trim()}` : '未填写' },
   { label: '节奏', value: paceLabel.value || '未选择' },
   { label: '同行', value: companionLabel.value || '未选择' },
+  { label: '旅客', value: `${form.travelers.adults} 成人 · ${form.travelers.children} 儿童 · ${form.travelers.infants} 婴儿` },
 ])
-const loadingSummaryItems = computed(() => summaryItems.value.filter((item) => item.value !== '未填写' && item.value !== '未选择').slice(0, 6))
-const currentStageIndex = computed(() => Math.max(generationStages.findIndex((stage) => stage.key === currentStageKey.value), 0))
-const activeStage = computed(() => generationStages[currentStageIndex.value])
-const completedStageCount = computed(() => isPlanComplete.value ? generationStages.length : currentStageIndex.value)
-const progressPercent = computed(() => Math.min(100, Math.round(((completedStageCount.value + (isLoading.value ? 0.45 : 0)) / generationStages.length) * 100)))
-const previewDays = computed(() => Array.from({ length: Math.min(Math.max(form.days, 1), 3) }, (_, index) => index + 1))
-const hiddenPreviewDays = computed(() => Math.max(form.days - previewDays.value.length, 0))
+const streamMessage = computed(() => streamSteps.value[streamSteps.value.length - 1] ?? '')
 
 watch(
   () => [form.start_date, form.end_date],
@@ -267,30 +226,16 @@ function applyTripRequest(request: Partial<TripPlanRequest>) {
   form.companions = request.companions ?? form.companions
   form.must_see = request.must_see ?? form.must_see
   form.avoid = request.avoid ?? form.avoid
-  form.notes = request.notes ? originalNotesFromRequest(request.notes) : form.notes
+  form.notes = request.notes ?? form.notes
   form.budget_breakdown.transport = request.budget_breakdown?.transport ?? form.budget_breakdown.transport
   form.budget_breakdown.hotel = request.budget_breakdown?.hotel ?? form.budget_breakdown.hotel
   form.budget_breakdown.food = request.budget_breakdown?.food ?? form.budget_breakdown.food
   form.budget_breakdown.tickets = request.budget_breakdown?.tickets ?? form.budget_breakdown.tickets
+  form.travelers = request.travelers ? { ...request.travelers } : form.travelers
   resetGeneration()
   copyMessage.value = ''
   manualCopyMarkdown.value = ''
   reuseMessage.value = ''
-  currentStageKey.value = 'requirements'
-}
-
-function originalNotesFromRequest(notes: string): string {
-  return notes
-    .split('；\n')
-    .filter((item) => !['节奏：', '同行人：', '必去：', '避开：', '分项预算：'].some((prefix) => item.startsWith(prefix)))
-    .join('；\n')
-}
-
-function updateCurrentStage(message: string) {
-  const stage = generationStages.find((item) => item.matchers.some((matcher) => message.includes(matcher)))
-  if (!stage) return
-
-  currentStageKey.value = stage.key
 }
 
 function consumeReusableTripRequest() {
@@ -316,7 +261,6 @@ async function createPlan() {
   copyMessage.value = ''
   manualCopyMarkdown.value = ''
   reuseMessage.value = ''
-  currentStageKey.value = 'requirements'
 
   const payload = {
     destination: form.destination.trim(),
@@ -336,19 +280,11 @@ async function createPlan() {
     end_date: form.end_date,
     must_see: form.must_see.trim(),
     avoid: form.avoid.trim(),
-    notes: submittedNotes.value,
+    notes: form.notes.trim(),
+    travelers: { ...form.travelers },
   }
 
   await generate(payload)
-}
-
-async function viewGeneratedTrip() {
-  if (!plan.value) return
-  await router.push(`/trips/${plan.value.trip_id}`)
-}
-
-async function viewWorkspace() {
-  await router.push('/workspace')
 }
 
 async function copyGeneratedMarkdown() {
@@ -409,11 +345,11 @@ function applyDestinationTemplate(destination: (typeof destinations)[number]) {
   form.budget_breakdown.hotel = ''
   form.budget_breakdown.food = ''
   form.budget_breakdown.tickets = ''
+  form.travelers = { adults: 1, children: 0, infants: 0 }
   resetGeneration()
   copyMessage.value = ''
   manualCopyMarkdown.value = ''
   reuseMessage.value = ''
-  currentStageKey.value = 'requirements'
   document.querySelector('#planner')?.scrollIntoView({ behavior: 'smooth' })
 }
 
@@ -703,6 +639,27 @@ function addDays(value: string, days: number): string {
                     </label>
                   </div>
 
+                  <fieldset>
+                    <legend class="text-sm font-medium">旅客人数</legend>
+                    <div class="mt-1.5 grid grid-cols-3 gap-2">
+                      <label class="block text-xs font-medium text-[#5d5b54]">
+                        <span>成人</span>
+                        <input v-model.number="form.travelers.adults" type="number" min="1" max="9" step="1" :aria-invalid="travelerValidation.adultsInvalid ? 'true' : undefined" aria-describedby="traveler-validation-message" class="mt-1 h-10 w-full rounded-md border border-[#c8c4be] bg-white px-2 text-sm outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" />
+                      </label>
+                      <label class="block text-xs font-medium text-[#5d5b54]">
+                        <span>儿童</span>
+                        <input v-model.number="form.travelers.children" type="number" min="0" max="8" step="1" :aria-invalid="travelerValidation.childrenInvalid ? 'true' : undefined" aria-describedby="traveler-validation-message" class="mt-1 h-10 w-full rounded-md border border-[#c8c4be] bg-white px-2 text-sm outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" />
+                      </label>
+                      <label class="block text-xs font-medium text-[#5d5b54]">
+                        <span>婴儿</span>
+                        <input v-model.number="form.travelers.infants" type="number" min="0" max="9" step="1" :aria-invalid="travelerValidation.infantsInvalid ? 'true' : undefined" aria-describedby="traveler-validation-message" class="mt-1 h-10 w-full rounded-md border border-[#c8c4be] bg-white px-2 text-sm outline-none focus:border-[#5645d4] focus:ring-2 focus:ring-[#d6b6f6]" />
+                      </label>
+                    </div>
+                    <p id="traveler-validation-message" class="mt-1.5 text-xs font-medium" :class="travelerValidation.message ? 'text-[#a02e6d]' : 'text-[#787671]'" :role="travelerValidation.message ? 'alert' : undefined">
+                      {{ travelerValidation.message || '每名婴儿需由一名成人陪同。' }}
+                    </p>
+                  </fieldset>
+
                   <div class="grid gap-3 sm:grid-cols-2">
                     <label class="block">
                       <span class="text-sm font-medium">必去</span>
@@ -727,9 +684,6 @@ function addDays(value: string, days: number): string {
                   {{ isLoading ? '正在整理路线...' : '生成路线草案' }}
                   <ArrowRight class="h-4 w-4" aria-hidden="true" />
                 </button>
-                <button v-if="isLoading" type="button" class="inline-flex min-h-10 w-full items-center justify-center rounded-md border border-[#c8c4be] bg-white px-5 py-2.5 text-sm font-medium text-[#37352f] hover:bg-[#f6f5f4]" @click="cancelGeneration">
-                  取消生成
-                </button>
               </div>
             </div>
           </form>
@@ -743,103 +697,20 @@ function addDays(value: string, days: number): string {
               <Route class="h-6 w-6 text-[#dd5b00]" aria-hidden="true" />
             </div>
 
-            <div v-if="isLoading" class="overflow-hidden rounded-xl border border-[#e5e3df] bg-white shadow-sm">
-              <div class="border-b border-[#e5e3df] bg-[#fafaf9] p-5 sm:p-6">
-                <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
-                  <div>
-                    <p class="text-xs font-semibold uppercase text-[#dd5b00]">路线草案生成中</p>
-                    <h4 class="mt-2 text-2xl font-semibold">{{ activeStage.title }}</h4>
-                    <p class="mt-2 max-w-2xl text-sm leading-6 text-[#5d5b54]">
-                      {{ streamMessage || activeStage.description }}
-                    </p>
-                  </div>
-                  <div class="rounded-xl border border-[#e5e3df] bg-white px-4 py-3 text-sm font-semibold text-[#37352f]">
-                    已完成 {{ completedStageCount }} / {{ generationStages.length }} 步
-                  </div>
-                </div>
-
-                <div class="mt-5 h-2 overflow-hidden rounded-full bg-[#e5e3df]" aria-hidden="true">
-                  <div class="h-full rounded-full bg-[#dd5b00] transition-all duration-500" :style="{ width: `${progressPercent}%` }" />
-                </div>
-              </div>
-
-              <div class="grid gap-5 p-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(280px,0.95fr)] sm:p-6">
-                <div class="space-y-4">
-                  <ol class="space-y-3">
-                    <li v-for="(stage, index) in generationStages" :key="stage.key" class="grid grid-cols-[32px_minmax(0,1fr)] gap-3">
-                      <span
-                        class="mt-0.5 grid h-8 w-8 place-items-center rounded-full border text-xs font-semibold transition"
-                        :class="[
-                          index < currentStageIndex || isPlanComplete ? 'border-[#1aae39]/30 bg-[#d9f3e1] text-[#11752b]' : '',
-                          index === currentStageIndex && !isPlanComplete ? 'border-[#dd5b00]/30 bg-[#fff3e6] text-[#793400] shadow-[0_0_0_4px_rgba(221,91,0,0.08)]' : '',
-                          index > currentStageIndex && !isPlanComplete ? 'border-[#e5e3df] bg-white text-[#bbb8b1]' : '',
-                        ]"
-                      >
-                        <span v-if="index < currentStageIndex || isPlanComplete">✓</span>
-                        <span v-else-if="index === currentStageIndex" class="h-2.5 w-2.5 animate-pulse rounded-full bg-[#dd5b00]" />
-                        <span v-else>{{ index + 1 }}</span>
-                      </span>
-                      <div
-                        class="rounded-xl border px-3 py-2.5 transition"
-                        :class="index === currentStageIndex && !isPlanComplete ? 'border-[#dd5b00]/30 bg-[#fff8ed]' : 'border-[#e5e3df] bg-[#fafaf9]'"
-                      >
-                        <p class="text-sm font-semibold text-[#1a1a1a]">{{ stage.title }}</p>
-                        <p class="mt-1 text-xs leading-5 text-[#5d5b54]">{{ stage.description }}</p>
-                      </div>
-                    </li>
-                  </ol>
-
-                  <div v-if="loadingSummaryItems.length > 0" class="rounded-xl border border-[#e5e3df] bg-[#f8f5e8] p-4">
-                    <p class="text-xs font-semibold uppercase text-[#9a5b13]">本次会优先考虑</p>
-                    <dl class="mt-3 grid gap-2 sm:grid-cols-2">
-                      <div v-for="item in loadingSummaryItems" :key="item.label" class="rounded-lg bg-white/70 px-3 py-2 text-sm">
-                        <dt class="text-xs font-semibold text-[#787671]">{{ item.label }}</dt>
-                        <dd class="mt-1 font-medium text-[#1a1a1a]">{{ item.value }}</dd>
-                      </div>
-                    </dl>
-                  </div>
-                </div>
-
-                <div class="rounded-xl border border-dashed border-[#d8c7a4] bg-[#f8f5e8] p-4">
-                  <div class="flex items-center justify-between gap-3 border-b border-[#d8c7a4] pb-3">
-                    <div>
-                      <p class="text-xs font-semibold tracking-[0.18em] text-[#9a5b13]">路线预览</p>
-                      <h5 class="mt-1 font-semibold">行程单正在成形</h5>
-                    </div>
-                    <span class="rounded-md bg-white/80 px-2 py-1 text-xs font-semibold text-[#793400]">{{ form.days }} 天</span>
-                  </div>
-
-                  <div class="mt-4 space-y-4">
-                    <article v-for="day in previewDays" :key="day" class="rounded-xl bg-white/75 p-3 shadow-sm">
-                      <div class="flex items-center justify-between gap-3">
-                        <p class="text-sm font-semibold text-[#1a1a1a]">第 {{ day }} 天 · {{ day === currentStageIndex ? '正在安排' : '等待填充' }}</p>
-                        <span class="h-2 w-2 rounded-full" :class="day <= currentStageIndex + 1 ? 'bg-[#dd5b00]' : 'bg-[#d8c7a4]'" />
-                      </div>
-                      <div class="mt-3 space-y-2">
-                        <div class="grid grid-cols-[48px_1fr] gap-3">
-                          <span class="text-xs font-semibold text-[#dd5b00]">09:00</span>
-                          <span class="h-3 animate-pulse rounded-full bg-[#523410]/15" />
-                        </div>
-                        <div class="grid grid-cols-[48px_1fr] gap-3">
-                          <span class="text-xs font-semibold text-[#dd5b00]">12:30</span>
-                          <span class="h-3 w-4/5 animate-pulse rounded-full bg-[#523410]/15" />
-                        </div>
-                        <div class="grid grid-cols-[48px_1fr] gap-3">
-                          <span class="text-xs font-semibold text-[#dd5b00]">16:00</span>
-                          <span class="h-3 w-3/5 animate-pulse rounded-full bg-[#523410]/15" />
-                        </div>
-                      </div>
-                    </article>
-                    <p v-if="hiddenPreviewDays > 0" class="text-xs font-medium text-[#787671]">还有 {{ hiddenPreviewDays }} 天会在生成完成后展开。</p>
-                  </div>
-                </div>
-              </div>
+            <div v-if="isLoading" class="rounded-xl border border-[#d8c7a4] bg-[#fafaf9] p-6">
+              <p class="text-xs font-semibold uppercase text-[#dd5b00]">路线草案生成中</p>
+              <h4 class="mt-2 text-2xl font-semibold">{{ streamMessage || '正在连接规划服务...' }}</h4>
+              <ol v-if="streamSteps.length" class="mt-5 space-y-2 text-sm leading-6 text-[#5d5b54]">
+                <li v-for="(step, index) in streamSteps" :key="step" :class="index === streamSteps.length - 1 ? 'font-semibold text-[#793400]' : ''">
+                  {{ index + 1 }}. {{ step }}
+                </li>
+              </ol>
             </div>
 
-            <div v-else-if="isCancelled" class="rounded-xl border border-[#d8c7a4] bg-[#f8f5e8] p-6">
-              <p class="text-xs font-semibold uppercase text-[#9a5b13]">已取消生成</p>
-              <h4 class="mt-2 text-2xl font-semibold">已停止本次路线规划。</h4>
-              <p class="mt-3 leading-7 text-[#5d5b54]">你可以调整左侧信息后重新开始。已收到的阶段信息会保留在下方，方便确认停在哪一步。</p>
+            <div v-else-if="isCancelled || (error && !plan)" class="rounded-xl border border-[#d8c7a4] bg-[#f8f5e8] p-6">
+              <p class="text-xs font-semibold uppercase" :class="error ? 'text-[#a02e6d]' : 'text-[#9a5b13]'">{{ error ? '生成失败' : '已取消生成' }}</p>
+              <h4 class="mt-2 text-2xl font-semibold">{{ error ? '路线草案暂时没有生成成功。' : '已停止本次路线规划。' }}</h4>
+              <p v-if="error" class="mt-3 leading-7 text-[#5d5b54]">{{ error }}</p>
               <dl class="mt-5 grid gap-3 text-sm sm:grid-cols-2">
                 <div class="rounded-lg bg-white/70 px-3 py-2">
                   <dt class="text-xs font-semibold text-[#787671]">Trace ID</dt>
@@ -850,32 +721,9 @@ function addDays(value: string, days: number): string {
                   <dd class="mt-1 font-medium text-[#1a1a1a]">{{ streamMessage || '尚未收到阶段状态' }}</dd>
                 </div>
               </dl>
-              <ul v-if="streamSteps.length" class="mt-4 space-y-2 text-sm leading-6 text-[#5d5b54]">
-                <li v-for="step in streamSteps.slice(-4)" :key="step">{{ step }}</li>
+              <ul v-if="streamSteps.length" class="mt-4 space-y-1 text-sm leading-6 text-[#5d5b54]">
+                <li v-for="step in streamSteps" :key="step">{{ step }}</li>
               </ul>
-            </div>
-
-            <div v-else-if="error && !plan" class="rounded-xl border border-[#e03131]/30 bg-[#fde0ec] p-6">
-              <p class="text-xs font-semibold uppercase text-[#a02e6d]">生成失败</p>
-              <h4 class="mt-2 text-2xl font-semibold text-[#1a1a1a]">路线草案暂时没有生成成功。</h4>
-              <p class="mt-3 leading-7 text-[#5d5b54]">{{ error }}</p>
-              <dl class="mt-5 grid gap-3 text-sm sm:grid-cols-2">
-                <div class="rounded-lg bg-white/70 px-3 py-2">
-                  <dt class="text-xs font-semibold text-[#787671]">Trace ID</dt>
-                  <dd class="mt-1 font-medium text-[#1a1a1a]">{{ traceId || '未返回' }}</dd>
-                </div>
-                <div class="rounded-lg bg-white/70 px-3 py-2">
-                  <dt class="text-xs font-semibold text-[#787671]">最后状态</dt>
-                  <dd class="mt-1 font-medium text-[#1a1a1a]">{{ streamMessage || '尚未收到阶段状态' }}</dd>
-                </div>
-              </dl>
-              <div v-if="streamSteps.length" class="mt-4 rounded-lg bg-white/70 p-3">
-                <p class="text-xs font-semibold text-[#787671]">最近阶段</p>
-                <ul class="mt-2 space-y-1 text-sm leading-6 text-[#5d5b54]">
-                  <li v-for="step in streamSteps.slice(-4)" :key="step">{{ step }}</li>
-                </ul>
-              </div>
-              <p class="mt-4 text-sm font-medium text-[#a02e6d]">请重试；如果持续失败，请带上 Trace ID 查看后端追踪。</p>
             </div>
 
             <div v-else-if="!plan" class="rounded-xl border border-dashed border-[#c8c4be] bg-[#fafaf9] p-6">
@@ -907,7 +755,7 @@ function addDays(value: string, days: number): string {
               <div class="rounded-xl border border-[#1aae39]/20 bg-[#f1fbf4] p-4">
                 <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
                   <div>
-                    <p class="text-xs font-semibold uppercase text-[#1aae39]">{{ isPlanComplete ? '已保存到工作台' : '已生成路线草案' }}</p>
+                    <p class="text-xs font-semibold uppercase text-[#1aae39]">已保存到工作台</p>
                     <h4 class="mt-1 text-xl font-semibold">{{ plan.destination }} 行程已经可以继续处理</h4>
                     <p class="mt-2 text-sm leading-6 text-[#5d5b54]">
                       行程 ID {{ plan.trip_id }}，你可以进入详情页继续复制、复用或重新生成。
@@ -915,9 +763,9 @@ function addDays(value: string, days: number): string {
                     </p>
                   </div>
                   <div class="flex flex-wrap gap-2">
-                    <button type="button" class="rounded-md bg-[#5645d4] px-3 py-2 text-sm font-medium text-white hover:bg-[#4534b3]" @click="viewGeneratedTrip">查看详情</button>
+                    <RouterLink :to="`/trips/${plan.trip_id}`" class="rounded-md bg-[#5645d4] px-3 py-2 text-sm font-medium text-white hover:bg-[#4534b3]">查看详情</RouterLink>
                     <button type="button" class="rounded-md border border-[#c8c4be] bg-white px-3 py-2 text-sm font-medium hover:bg-[#f6f5f4]" @click="copyGeneratedMarkdown">复制 Markdown</button>
-                    <button type="button" class="rounded-md border border-[#c8c4be] bg-white px-3 py-2 text-sm font-medium hover:bg-[#f6f5f4]" @click="viewWorkspace">查看工作台</button>
+                    <RouterLink to="/workspace" class="rounded-md border border-[#c8c4be] bg-white px-3 py-2 text-sm font-medium hover:bg-[#f6f5f4]">查看工作台</RouterLink>
                   </div>
                 </div>
                 <p v-if="copyMessage" class="mt-3 text-sm font-medium text-[#1aae39]">{{ copyMessage }}</p>

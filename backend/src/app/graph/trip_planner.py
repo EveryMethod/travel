@@ -3,12 +3,14 @@
 import json
 import re
 from collections.abc import Iterator
+from datetime import datetime
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import ValidationError
 
-from src.app.models.trip import TripPlanRequest, TripPlanResponse
+from src.app.graph.transport_planner import plan_transport_with_graph
+from src.app.models.trip import IntercityTransportPlan, TripPlanRequest, TripPlanResponse
 from src.app.services.llm_service import generate_json
 from src.app.services.mcp_client import call_tool
 
@@ -19,14 +21,20 @@ class TripPlannerState(TypedDict, total=False):
     constraints: dict[str, Any]
     draft: dict[str, Any]
     plan: TripPlanResponse
+    transport_plan: IntercityTransportPlan | None
 
 
 _ROUTE_LEG_MAX_ITEMS_PER_DAY = 4
 _ROUTE_LEG_RISK_SECONDS = 45 * 60
 
 
-def plan_trip_with_graph(request: TripPlanRequest) -> TripPlanResponse:
-    final_state = _trip_planner_graph.invoke({"request": request})
+def plan_trip_with_graph(
+    request: TripPlanRequest,
+    transport_plan: IntercityTransportPlan | None = None,
+) -> TripPlanResponse:
+    if transport_plan is None:
+        transport_plan = plan_transport_with_graph(request)
+    final_state = _trip_planner_graph.invoke({"request": request, "transport_plan": transport_plan})
     return final_state["plan"]
 
 
@@ -34,6 +42,9 @@ def stream_trip_with_graph(request: TripPlanRequest) -> Iterator[dict[str, Any]]
     state: TripPlannerState = {"request": request}
     yield {"type": "status", "message": "正在整理旅行需求..."}
     state.update(_normalize_request(state))
+    yield {"type": "status", "message": "正在查询航班、铁路和自驾方案..."}
+    state["transport_plan"] = plan_transport_with_graph(request)
+    yield {"type": "status", "message": "正在根据抵达和返程时间安排目的地行程..."}
     yield {"type": "status", "message": "正在查询目的地、天气和路线数据..."}
     state.update(_collect_map_context(state))
     yield {"type": "context", "data": _compact_context(state["context"])}
@@ -104,7 +115,7 @@ def _collect_map_context(state: TripPlannerState) -> TripPlannerState:
 
     context["weather"] = _safe_call_tool("amap_weather", {"city": request.destination}, {"lives": []})
 
-    if request.origin:
+    if request.origin and not state.get("transport_plan"):
         origin = _safe_call_tool("amap_geocode", {"address": request.origin}, {"geocodes": []})
         destination = _safe_call_tool("amap_geocode", {"address": request.destination}, {"geocodes": []})
         origin_location = _first_location(origin)
@@ -131,20 +142,16 @@ def _safe_call_tool(name: str, arguments: dict[str, Any], fallback: dict[str, An
 def _collect_price_context(state: TripPlannerState) -> TripPlannerState:
     request = state["request"]
     context = state["context"]
-    queries = [
-        f"{request.destination} 景点 门票 价格",
-        f"{request.origin} 到 {request.destination} 车票 高铁 机票 价格",
-        f"{request.destination} 交通 地铁 打车 价格",
-    ]
+    queries = [f"{request.destination} 景点 门票 价格"]
+    if not state.get("transport_plan"):
+        queries.append(f"{request.origin} 到 {request.destination} 车票 高铁 机票 价格")
+    queries.append(f"{request.destination} 交通 地铁 打车 价格")
     for poi in _compact_context(context)["pois"][:3]:
         queries.append(f"{poi.get('name')} 门票 价格 预约")
 
     prices = []
     for query in queries[:5]:
-        try:
-            prices.append(call_tool("ticket_price_search", {"query": query, "max_results": 2}))
-        except Exception:
-            prices.append({"query": query, "results": []})
+        prices.append(_safe_call_tool("ticket_price_search", {"query": query, "max_results": 2}, {"query": query, "results": []}))
 
     context["prices"] = prices
     return {"request": request, "context": context}
@@ -221,6 +228,9 @@ def _draft_plan(state: TripPlannerState) -> TripPlannerState:
                     "必须优先满足 must_see，不安排 avoid。"
                     "必须按 pace_rule 控制每天活动数量，并按 companions_rule 调整强度和提醒。"
                     "预算建议必须参考 budget_breakdown；不确定价格写区间或需查询官方渠道。"
+                    "intercity_transport 由程序维护，不得输出、修改或重写。"
+                    "首日不得安排早于 destination_ready_at 的活动，末日活动必须在 destination_depart_by 前结束。"
+                    "边界日期可用时间不足时，首日只安排抵达和入住，末日只安排退房和返程。"
                 ),
             },
             {
@@ -230,6 +240,9 @@ def _draft_plan(state: TripPlannerState) -> TripPlannerState:
                         "request": request.model_dump(),
                         "map_context": _compact_context(context),
                         "price_context": _compact_prices(context.get("prices")),
+                        "intercity_transport": (
+                            state["transport_plan"].model_dump(mode="json") if state.get("transport_plan") else None
+                        ),
                         "constraints": {
                             "language": "zh-CN",
                             "days_count": request.days,
@@ -279,19 +292,27 @@ def _validate_plan(state: TripPlannerState) -> TripPlannerState:
     plan.days = plan.days[: request.days]
     if len(plan.days) != request.days:
         raise ValueError("LLM returned an itinerary with the wrong number of days.")
-    return {"request": request, "context": state.get("context", {}), "constraints": state.get("constraints", {}), "plan": plan}
+    plan.intercity_transport = state.get("transport_plan")
+    return {
+        "request": request,
+        "context": state.get("context", {}),
+        "constraints": state.get("constraints", {}),
+        "transport_plan": state.get("transport_plan"),
+        "plan": plan,
+    }
 
 
 def _review_plan(state: TripPlannerState) -> TripPlannerState:
     request = state["request"]
     plan = state["plan"]
     constraints = state.get("constraints", {})
-
+    transport_warnings = _enforce_transport_windows(plan)
     warnings = _review_warnings(request, plan, constraints)
+    original_tips = list(dict.fromkeys([*plan.tips, *transport_warnings]))
     if warnings:
-        original_tips = list(plan.tips)
         try:
             plan = _repair_plan(request, plan, constraints, warnings)
+            transport_warnings = _enforce_transport_windows(plan)
             for tip in original_tips:
                 if tip not in plan.tips:
                     plan.tips.append(tip)
@@ -299,16 +320,25 @@ def _review_plan(state: TripPlannerState) -> TripPlannerState:
         except Exception:
             pass
 
-    for warning in warnings:
+    for warning in [*transport_warnings, *warnings]:
         if warning not in plan.tips:
             plan.tips.append(warning)
 
-    return {"request": request, "context": state.get("context", {}), "constraints": constraints, "plan": plan}
+    return {
+        "request": request,
+        "context": state.get("context", {}),
+        "constraints": constraints,
+        "transport_plan": state.get("transport_plan"),
+        "plan": plan,
+    }
 
 
-def _review_warnings(request: TripPlanRequest, plan: TripPlanResponse, constraints: dict[str, Any]) -> list[str]:
+def _review_warnings(
+    request: TripPlanRequest,
+    plan: TripPlanResponse,
+    constraints: dict[str, Any],
+) -> list[str]:
     warnings: list[str] = []
-
     max_items = {"relaxed": 3, "balanced": 3, "packed": 4}.get(request.pace, 3)
     pace_label = {"relaxed": "慢游", "balanced": "适中", "packed": "紧凑"}.get(request.pace, "适中")
     for day in plan.days:
@@ -333,7 +363,8 @@ def _review_warnings(request: TripPlanRequest, plan: TripPlanResponse, constrain
     if isinstance(budget_total, int) and estimated_cost is not None and estimated_cost > budget_total * 1.15:
         warnings.append(f"可解析费用约 {estimated_cost} 元，已明显高于预算 {budget_total} 元，请压缩活动或提高预算。")
 
-    warnings.extend(_review_route_legs(plan))
+    if constraints.get("review_routes", True):
+        warnings.extend(_review_route_legs(plan))
     return warnings
 
 
@@ -359,7 +390,7 @@ def _repair_plan(
                 "content": json.dumps(
                     {
                         "request": request.model_dump(),
-                        "plan": plan.model_dump(),
+                        "plan": plan.model_dump(mode="json"),
                         "constraints": constraints,
                         "warnings": warnings,
                     },
@@ -372,10 +403,82 @@ def _repair_plan(
     repaired_plan.days = repaired_plan.days[: request.days]
     if len(repaired_plan.days) != request.days:
         raise ValueError("LLM repaired itinerary has the wrong number of days.")
+    repaired_plan.intercity_transport = (
+        plan.intercity_transport.model_copy(deep=True) if plan.intercity_transport else None
+    )
     return repaired_plan
 
 
+def _item_datetime(date_text: str, time_text: str, boundary: datetime) -> datetime | None:
+    if not re.fullmatch(r"\d{2}:\d{2}", time_text.strip()):
+        return None
+    try:
+        scheduled = datetime.strptime(f"{date_text} {time_text.strip()}", "%Y-%m-%d %H:%M")
+    except ValueError:
+        return None
+    return scheduled.replace(tzinfo=boundary.tzinfo)
+
+
+def _enforce_transport_windows(plan: TripPlanResponse) -> list[str]:
+    transport = plan.intercity_transport
+    if not transport:
+        return []
+
+    ready_at = transport.destination_ready_at
+    depart_by = transport.destination_depart_by
+    removed_early = False
+    removed_late = False
+    if not plan.days:
+        return []
+
+    first_day = plan.days[0]
+    last_day = plan.days[-1]
+    first_emptied = False
+    last_emptied = False
+
+    if ready_at:
+        kept = [
+            item
+            for item in first_day.items
+            if (scheduled := _item_datetime(first_day.date, item.time, ready_at)) is None or scheduled >= ready_at
+        ]
+        if len(kept) != len(first_day.items):
+            removed_early = True
+            first_day.items = kept
+            first_emptied = not kept
+
+    if depart_by:
+        kept = [
+            item
+            for item in last_day.items
+            if (scheduled := _item_datetime(last_day.date, item.time, depart_by)) is None or scheduled <= depart_by
+        ]
+        if len(kept) != len(last_day.items):
+            removed_late = True
+            last_day.items = kept
+            last_emptied = not kept
+
+    if first_day is last_day and not first_day.items and (first_emptied or last_emptied):
+        note = "受抵达和返程时间限制，当日仅适合安排抵达和入住、退房和返程。"
+        if note not in first_day.notes:
+            first_day.notes.append(note)
+    else:
+        if first_emptied and "首日可用时间不足，仅适合安排抵达和入住。" not in first_day.notes:
+            first_day.notes.append("首日可用时间不足，仅适合安排抵达和入住。")
+        if last_emptied and "末日可用时间不足，仅适合安排退房和返程。" not in last_day.notes:
+            last_day.notes.append("末日可用时间不足，仅适合安排退房和返程。")
+
+    tips = []
+    if removed_early:
+        tips.append("已移除早于抵达及接驳完成时间的首日活动。")
+    if removed_late:
+        tips.append("已移除晚于返程出发缓冲时间的末日活动。")
+    return tips
+
+
 def _normalize_plan_shape(value: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(value.get("tips"), str):
+        value["tips"] = [value["tips"]]
     for day in value.get("days", []):
         if isinstance(day.get("notes"), str):
             day["notes"] = [day["notes"]]

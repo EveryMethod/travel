@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     llm_name: str = "gpt-4o-mini"
     llm_temperature: float = 0.4
-    llm_timeout_seconds: int = 60
+    llm_timeout_seconds: int = 180
     mcp_gateway_url: str = "http://127.0.0.1:8100"
     mcp_timeout_seconds: int = 20
     trace_enabled: bool = True
@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     amap_api_key: str = ""
     tavily_api_key: str = ""
     tavily_search_url: str = "https://api.tavily.com/search"
+    amadeus_api_key: str = ""
+    amadeus_api_secret: str = ""
+    amadeus_api_base_url: str = "https://test.api.amadeus.com"
+    variflight_api_key: str = ""
+    variflight_api_url: str = "https://mcp.variflight.com/api/v1/mcp/data"
+    juhe_flight_api_key: str = ""
+    juhe_flight_api_url: str = "https://apis.juhe.cn/flight/query"
+    juhe_train_api_key: str = ""
+    juhe_train_api_url: str = "https://apis.juhe.cn/fapigw/train/query"
     auth_access_token_ttl_seconds: int = 60 * 30
     auth_refresh_token_ttl_seconds: int = 60 * 60 * 24 * 30
 
