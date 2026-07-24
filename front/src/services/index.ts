@@ -10,28 +10,40 @@ import type {
   SavedTripListItem,
   TripPlanRequest,
   TripPlanResponse,
+  TripRevisionRequest,
   TripStreamEvent,
 } from '@/types'
 
 const AUTH_TOKEN_KEY = 'travel_auth_tokens'
-
-export async function planTrip(payload: TripPlanRequest): Promise<TripPlanResponse> {
-  return request<TripPlanResponse>('/api/trips/plan', {
-    method: 'POST',
-    body: payload,
-  })
-}
 
 export async function planTripStream(
   payload: TripPlanRequest,
   onEvent: (event: TripStreamEvent) => void,
   options: { signal?: AbortSignal } = {},
 ): Promise<TripPlanResponse> {
+  return streamTrip('/api/trips/plan/stream', payload, onEvent, options)
+}
+
+export async function reviseTripStream(
+  tripId: number | string,
+  payload: TripRevisionRequest,
+  onEvent: (event: TripStreamEvent) => void,
+  options: { signal?: AbortSignal } = {},
+): Promise<TripPlanResponse> {
+  return streamTrip(`/api/trips/${tripId}/revise/stream`, payload, onEvent, options)
+}
+
+async function streamTrip(
+  url: string,
+  payload: TripPlanRequest | TripRevisionRequest,
+  onEvent: (event: TripStreamEvent) => void,
+  options: { signal?: AbortSignal },
+): Promise<TripPlanResponse> {
   let response: Response
   const tokens = getAuthTokens()
 
   try {
-    response = await fetch('/api/trips/plan/stream', {
+    response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -131,6 +143,10 @@ export async function getTrip(id: number | string): Promise<SavedTripDetail> {
 
 export async function deleteTrip(id: number | string): Promise<void> {
   await request<void>(`/api/trips/${id}`, { method: 'DELETE' })
+}
+
+export function refreshTripTransport(tripId: number | string): Promise<TripPlanResponse> {
+  return request<TripPlanResponse>(`/api/trips/${tripId}/transport/refresh`, { method: 'POST' })
 }
 
 export async function register(payload: RegisterRequest, remember: boolean): Promise<AuthResponse> {

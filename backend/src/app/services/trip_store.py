@@ -71,6 +71,14 @@ def get_user_trip_detail(*, db: Session, user_id: int, trip_id: int) -> SavedTri
     )
 
 
+def replace_user_trip_plan(*, db: Session, user_id: int, trip_id: int, plan: TripPlanResponse) -> TripPlanResponse:
+    trip = get_user_trip_or_404(db=db, user_id=user_id, trip_id=trip_id)
+    plan.trip_id = str(trip.id)
+    trip.plan_json = plan.model_dump(mode="json")
+    db.commit()
+    return plan
+
+
 def delete_user_trip(*, db: Session, user_id: int, trip_id: int) -> None:
     trip = get_user_trip_or_404(db=db, user_id=user_id, trip_id=trip_id)
     db.delete(trip)

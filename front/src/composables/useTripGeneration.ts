@@ -1,16 +1,19 @@
 import { onUnmounted, ref } from 'vue'
 
-import { isAbortError, planTripStream } from '@/services'
-import type { TripPlanRequest, TripPlanResponse, TripStreamEvent } from '@/types'
+import { isAbortError, planTripStream, reviseTripStream } from '@/services'
+import type { TripPlanRequest, TripPlanResponse, TripRevisionRequest, TripStreamEvent } from '@/types'
 
-export function useTripGeneration(onStatus?: (message: string) => void) {
+type TripStreamCall = (
+  onEvent: (event: TripStreamEvent) => void,
+  options: { signal?: AbortSignal },
+) => Promise<TripPlanResponse>
+
+export function useTripGeneration() {
   const plan = ref<TripPlanResponse | null>(null)
   const error = ref('')
   const isGenerating = ref(false)
-  const isComplete = ref(false)
   const isCancelled = ref(false)
   const traceId = ref('')
-  const lastStatus = ref('')
   const streamSteps = ref<string[]>([])
 
   let controller: AbortController | null = null
@@ -23,10 +26,8 @@ export function useTripGeneration(onStatus?: (message: string) => void) {
     plan.value = null
     error.value = ''
     isGenerating.value = false
-    isComplete.value = false
     isCancelled.value = false
     traceId.value = ''
-    lastStatus.value = ''
     streamSteps.value = []
   }
 
@@ -36,7 +37,7 @@ export function useTripGeneration(onStatus?: (message: string) => void) {
     controller.abort()
   }
 
-  async function generate(payload: TripPlanRequest): Promise<TripPlanResponse | null> {
+  async function run(streamCall: TripStreamCall): Promise<TripPlanResponse | null> {
     controller?.abort()
     const activeRunId = runId + 1
     runId = activeRunId
@@ -44,30 +45,22 @@ export function useTripGeneration(onStatus?: (message: string) => void) {
     plan.value = null
     error.value = ''
     isGenerating.value = true
-    isComplete.value = false
     isCancelled.value = false
     traceId.value = ''
-    lastStatus.value = ''
     streamSteps.value = []
 
     try {
-      const generatedPlan = await planTripStream(
-        payload,
+      const generatedPlan = await streamCall(
         (event: TripStreamEvent) => {
           if (activeRunId !== runId) return
           if (event.type === 'trace') {
             traceId.value = event.trace_id
           }
           if (event.type === 'status') {
-            lastStatus.value = event.message
             streamSteps.value = [...streamSteps.value, event.message].slice(-4)
-            onStatus?.(event.message)
           }
           if (event.type === 'plan') {
             plan.value = event.data
-          }
-          if (event.type === 'done') {
-            isComplete.value = true
           }
         },
         { signal: controller.signal },
@@ -79,7 +72,6 @@ export function useTripGeneration(onStatus?: (message: string) => void) {
       if (activeRunId !== runId) return null
       if (isAbortError(caughtError)) {
         if (plan.value) {
-          isComplete.value = true
           isCancelled.value = false
           error.value = ''
           return plan.value
@@ -98,18 +90,25 @@ export function useTripGeneration(onStatus?: (message: string) => void) {
     }
   }
 
+  function generate(payload: TripPlanRequest): Promise<TripPlanResponse | null> {
+    return run((onEvent, options) => planTripStream(payload, onEvent, options))
+  }
+
+  function revise(tripId: number | string, payload: TripRevisionRequest): Promise<TripPlanResponse | null> {
+    return run((onEvent, options) => reviseTripStream(tripId, payload, onEvent, options))
+  }
+
   onUnmounted(() => cancel())
 
   return {
     plan,
     error,
     isGenerating,
-    isComplete,
     isCancelled,
     traceId,
-    lastStatus,
     streamSteps,
     generate,
+    revise,
     cancel,
     reset,
   }

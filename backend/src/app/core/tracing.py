@@ -47,7 +47,7 @@ class CallTraceRecord:
 
 @contextmanager
 def trace_context(trace_id: str | None = None) -> Iterator[str]:
-    active_trace_id = _trace_id_for_storage(trace_id)
+    active_trace_id = normalize_trace_id(trace_id)
     trace_token = _trace_id.set(active_trace_id)
     span_token = _span_id.set(None)
     try:
@@ -61,7 +61,7 @@ def current_trace_id() -> str | None:
     return _trace_id.get()
 
 
-def _trace_id_for_storage(trace_id: str | None = None) -> str:
+def normalize_trace_id(trace_id: str | None = None) -> str:
     value = (trace_id or str(uuid4())).strip()
     return value[:36] or str(uuid4())
 
@@ -245,6 +245,7 @@ def demo() -> None:
     old_logger_disabled = logger.disabled
     _write_record = fake_write
     try:
+        assert normalize_trace_id("  trace-demo  ") == "trace-demo"
         assert current_trace_id() is None
         with trace_context("trace-demo") as trace_id:
             assert trace_id == "trace-demo"
@@ -307,7 +308,7 @@ def demo() -> None:
         assert summarize_value({"keywords": "西湖", "api_key": "secret"}) == {"keywords": "西湖", "api_key": _REDACTED}
         assert summarize_value({"abcdef": 1, "abcxyz": 2}, max_chars=3) == {"abc": 1, "abc#1": 2}
         assert summarize_value(float("nan")) == {"type": "float", "value": "nan"}
-        assert len(_trace_id_for_storage("x" * 100)) == 36
+        assert len(normalize_trace_id("x" * 100)) == 36
 
         _write_record = fake_write
         mutable_input = {"city": "杭州"}
