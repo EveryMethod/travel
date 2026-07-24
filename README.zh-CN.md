@@ -130,10 +130,3 @@ FastAPI 文档地址为 `http://127.0.0.1:8000/docs` 和 `http://127.0.0.1:8100/
 python -m compileall backend/src
 corepack pnpm --dir front build
 ```
-
-## 安全说明
-
-- 将 API Key、数据库密码和 OAuth 凭证保存在 `backend/.env` 或密钥管理服务中。
-- 只提交凭证值为空的 `backend/.env.example`。
-- 如果凭证曾出现在源码、日志、截图或聊天记录中，请立即轮换。
-- 非开发环境应限制调用追踪查询接口。
