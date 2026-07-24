@@ -1,6 +1,13 @@
 # Claude local workspace data
 .claude/
 
+# Local IDE and browser tooling
+.idea/
+.vscode/
+.playwright-mcp/
+.pnpm-store/
+.DS_Store
+
 # Frontend generated files
 front/node_modules/
 front/dist/
@@ -14,3 +21,19 @@ __pycache__/
 .env
 *.env
 !.env.example
+
+# Local databases and machine-specific settings
+*.db
+*.sqlite
+*.sqlite3
+*.local
+
+# Local plans and tests
+docs/ROADMAP.md
+docs/superpowers/plans/
+docs/superpowers/specs/
+**/tests/
+**/test_*.py
+**/*_test.py
+**/*.test.*
+**/*.spec.*
